@@ -12,9 +12,12 @@ min = max in one transverse axis, and so a singleton axis. Its pressure function
   medium. A tone burst long enough to reach a steady state is fitted for its harmonics as a
   time-domain record (:func:`acoustic_outputs.preprocess.time_domain.from_time_series`).
 
-FOCUS's documentation does not state its time convention (exp(+j omega t) or exp(-j omega t)),
-whether the KZK harmonics are in retarded time, or the normalisation of the CW and KZK
-pressures. So by default :func:`from_focus` reads the convention from the field, by how fast its
+FOCUS's documentation does not state its time convention or the normalisation of its pressures.
+Run (FOCUS 0.981, Octave build), ``fnm_cw`` gives p = Re P exp(+j omega t) in absolute phase, in
+Pa for the transducer's surface velocity (``amplitude``, 1 m/s by default): a piston's axis matches
+rho c u (exp(-j k z) - exp(-j k sqrt(z^2 + a^2))) to 1e-13 (``tests/test_real_outputs.py``).
+Whether ``kzk_cw``'s harmonics are in retarded time is not known (that build has no KZK
+functions). So by default :func:`from_focus` reads the convention from the field, by how fast its
 phase turns along z (:func:`acoustic_outputs.preprocess._common.phase_convention`): about -k or
 +k per metre in absolute phase, far less in retarded time. That needs planes closer than 0.45
 wavelengths; otherwise KZK harmonics are taken as retarded, exp(+j omega t) (give ``phase`` and
@@ -23,9 +26,11 @@ is the same either way. ``scale`` multiplies a pressure that is
 not in Pa (e.g. one computed for a unit surface velocity). The beam is taken to travel along +z,
 FOCUS's transducer axis.
 
-Save the grid's vectors (or ``delta`` and the limits) and the medium with the pressure::
+Save the coordinate grid struct (its fields ``delta``, ``xmin`` .. ``zmax`` are read) and the
+medium struct (``density``, ``soundspeed``) with the pressure; or the grid's vectors x, y, z::
 
-    save('focus.mat', 'pressure', 'x', 'y', 'z', 'f0')     % x = xmin:dx:xmax, ...
+    save('-v7', 'focus.mat', 'pressure', 'coordinate_grid', 'medium', 'f0')
+    save('-v7', 'focus_tsd.mat', 'pressure', 'coordinate_grid', 'medium', 'f0', 'deltat', 'tmin')
 """
 
 from __future__ import annotations

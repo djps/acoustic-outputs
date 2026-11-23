@@ -20,11 +20,17 @@ one of two forms:
 
 Coordinates: mgrid.x (and mgrid.y in 3D) are centred on 0 (``set_grid``'s ``makeDim``);
 mgrid.z is centred as well and is *not* the distance from the source, so the planes are placed
-at z0 + (i - 1) dz, with z0 = 0 at the source plane unless given. A ``set_grid`` object cannot be
-read outside MATLAB; save ``struct(mgrid)``, or its fields, with the results::
+at z0 + (i - 1) dz, with z0 = 0 at the source plane unless given. These conventions were checked
+on mSOUND v0.1 run in Octave: ``Forward2D_fund`` and ``Forward3D_fund`` match an angular-spectrum
+propagation exp(-i kz z) of their source plane (with their evanescent filter) to round-off, and
+``Forward2D``'s fitted record matches ``Forward2D_fund`` (``tests/test_real_outputs.py``).
 
-    mgrid_s = struct(mgrid);  fc = omega_c / (2 * pi);
-    save('msound.mat', 'P_fundamental', 'P_second', 'mgrid_s', 'medium', 'fc')
+A ``set_grid`` object cannot be read outside MATLAB, and Octave cannot save ``struct(mgrid)``;
+save the fields that are needed (MATLAB can also save ``struct(mgrid)``)::
+
+    mgrid_s = struct('dx', mgrid.dx, 'dy', mgrid.dy, 'dz', mgrid.dz, 'dt', mgrid.dt, 'x', mgrid.x, 'y', mgrid.y);
+    fc = omega_c / (2 * pi);
+    save('-v7', 'msound.mat', 'P_fundamental', 'P_second', 'mgrid_s', 'medium', 'fc')
 """
 
 from __future__ import annotations

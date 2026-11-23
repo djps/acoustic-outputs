@@ -60,7 +60,7 @@ res.save("outputs")
 A dataset holds named arrays and scalars.
 
 - **Kind:** its `kind` is stored in the file under `kind`, or given with `--kind`.
-- **Structs:** `kgrid`, `sensor`, `sensor_data`, `medium`, `grid` and `mgrid` (or `mgrid_s`) saved whole are read field by field, so a MATLAB k-Wave `.mat` file works as it is. mSOUND's `set_grid` object can't be read outside MATLAB: save `mgrid_s = struct(mgrid)`.
+- **Structs:** `kgrid`, `sensor`, `sensor_data`, `medium`, `grid` and `mgrid` (or `mgrid_s`) saved whole are read field by field, so a MATLAB k-Wave `.mat` file works as it is. mSOUND's `set_grid` object can't be read outside MATLAB, and Octave can't save `struct(mgrid)`: save a struct of the fields, e.g. `mgrid_s = struct('dx', mgrid.dx, 'dy', mgrid.dy, 'dz', mgrid.dz, 'dt', mgrid.dt, 'x', mgrid.x, 'y', mgrid.y)`. FOCUS's `coordinate_grid` and `medium` structs are read as they are.
 - **Medium:** every kind needs `frequency` (or `f0`), `sound_speed` (or `c0`) and `density` (or `rho0`), from the file or the command line. For BabelBrain, the frequency comes from the `_<f>kHz_` part of the file name, and rho0 and c0 from the material at the target. mSOUND's `fc`, `medium.c0` and `medium.rho0`, and FOCUS's `soundspeed`, are also recognised.
 - **Recognised without `kind`:** BabelBrain and mSOUND files. FOCUS files need `--kind focus`.
 
@@ -99,12 +99,13 @@ Every kind also takes these optional keys:
   - **Conventions, from its source:** the frequency-domain fields are p = Re P exp(+iωt) in absolute phase (the propagator is exp(iK dz) with K = −√(ω²/c0² − k⊥²)), |P| is the peak amplitude, and plane i is (i − 1) dz from the source plane. The time-domain records start at t = 0 and are periodic over the window.
   - **z:** mgrid.z is centred on 0 and is not the distance from the source, so it is ignored; give `z0` for the source plane's position.
   - **Medium:** a heterogeneous `medium.rho` can't be used for the intensities: `medium.rho0`, or `--density`, is needed.
-  - **Checked against:** mSOUND v0.1's source (`Forward3D_fund.m`, `Forward3D.m`, `set_grid.m`). Version 0.2 changed `Forward3D_fund` and `Forward3D_sec`, and moved the extra plane into `set_grid`'s `num_z`. The reader takes the number of planes from the array, so that should not matter, but version 0.2's source has not been read. Not yet run on real mSOUND output.
+  - **Checked against:** mSOUND v0.1 run in GNU Octave 10. `Forward2D_fund` and `Forward3D_fund` match an angular-spectrum propagation of their own source plane to round-off, and the fit of `Forward2D`'s and `Forward3D`'s CW records matches them to 1e-5 or better.
+  - **Version 0.2** changed `Forward3D_fund` and `Forward3D_sec`, and moved the extra plane into `set_grid`'s `num_z`. The reader takes the number of planes from the array, so that should not matter, but version 0.2 has not been run.
 - **FOCUS.**
-  - **Conventions:** FOCUS's documentation does not give its time convention, whether `kzk_cw`'s harmonics are in retarded time, or the scaling of its CW pressure. The reader reads the convention from how fast the phase turns along z (about ±k per metre in absolute phase, far less in retarded time). That needs planes less than 0.45 wavelengths apart; otherwise KZK harmonics are taken as retarded, exp(+iωt). A single frequency doesn't depend on the convention.
-  - **Scale:** the pressure is taken to be in Pa; `scale` multiplies it if it isn't (for instance, a field computed for a unit surface velocity).
+  - **Conventions:** FOCUS's documentation does not give them, but run, `fnm_cw` gives p = Re P e^{+iωt} in absolute phase, in Pa for the transducer's surface velocity (1 m/s by default). Whether `kzk_cw`'s harmonics are in retarded time is unknown. The reader reads the convention from how fast the phase turns along z (about ±k per metre in absolute phase, far less in retarded time). That needs planes less than 0.45 wavelengths apart; otherwise KZK harmonics are taken as retarded, exp(+iωt). A single frequency doesn't depend on the convention.
+  - **Scale:** the pressure is taken to be in Pa; `scale` multiplies it, for instance by the real surface velocity if the field was computed for 1 m/s.
   - **Transients** (`fnm_tsd`) are lossless and must be tone bursts long enough to reach a steady state.
-  - **Checked against:** the documentation only. Not yet run on real FOCUS output.
+  - **Checked against:** FOCUS 0.981's Octave build. A piston's `fnm_cw` axis matches the exact solution to 1e-9, and an `fnm_tsd` tone burst, fitted, matches it to 1e-4. That build has no `kzk_cw`, so the KZK route is tested only on synthetic data.
 - **2D fields.** A 2D field (one transverse axis) gives power and areas per metre. Its y widths and its thermal and mechanical indices are NaN.
 
 ## Layout
@@ -140,6 +141,7 @@ pytest          # about 40 s; tests/test_kwave.py runs k-wave-python if it is in
 - **mSOUND and FOCUS:** the beam written as each of their functions writes it gives the metrics of the same harmonics:
   - mSOUND in 3D and 2D, with the transverse grid from the spacings alone, a `.mat` file holding `struct(mgrid)` and `medium`, and time-domain series on a sensor mask;
   - FOCUS CW with either time convention (read from the field), KZK harmonics (read as retarded; on coarse planes, taken as retarded with a warning), transients, grids given by `delta` and limits, and xz and yz 2D grids.
+- **Real FOCUS and mSOUND output:** `tests/data/` holds small outputs of FOCUS 0.981 and mSOUND v0.1, made by `tests/data/make_fixtures.m` in GNU Octave 10. They are checked against physics: a piston's exact axis (FOCUS) and an angular-spectrum propagation (mSOUND).
 - **Files and command line:** the `.npz`, `.mat` and HDF5 readers, and the `acoustic-outputs` command.
 - **Real k-Wave run:** a k-wave-python CW run is compared with an angular-spectrum projection of its own first plane. They agree to within 6% of the peak.
 

@@ -438,8 +438,8 @@ def _focus(keys: _Keys, common: dict[str, Any]) -> Results:
     if p is None:
         p = keys.raw("p", required=True)
     p = np.asarray(p)
-    if p.ndim == 2 and y.size == 1:  # MATLAB saved (nx, 1, nz) as (nx, nz)
-        p = p[:, None, :]
+    if y.size == 1 and (p.ndim < 2 or p.shape[1] != 1):  # the singleton y squeezed out on reading
+        p = np.expand_dims(p, 1)
     dt = keys.num("deltat")
     ts = keys.get("time_sign")
     return focus.from_focus(
