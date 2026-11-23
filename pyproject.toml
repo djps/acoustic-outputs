@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "acoustic-outputs"
+dynamic = ["version"]
+description = "Acoustic field parameters (IEC 62127-1, 61828, 62359, 61689, TS 62556 and beam metrics) from the output of frequency-domain, time-domain pseudo-spectral and FDTD solvers"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "David Sinden" }]
+keywords = ["acoustics", "ultrasound", "HIFU", "IEC 62127", "k-Wave", "FDTD", "field parameters"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Intended Audience :: Science/Research",
+]
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "beartype>=0.18",
+]
+
+[project.optional-dependencies]
+hdf5 = ["h5py>=3.8", "hdf5plugin>=4"]
+kwave = ["k-wave-python>=0.6"]
+test = ["pytest>=7", "h5py>=3.8", "hdf5plugin>=4"]
+dev = ["pytest>=7", "h5py>=3.8", "hdf5plugin>=4", "ruff>=0.4", "mypy>=1.8"]
+
+[project.scripts]
+acoustic-outputs = "acoustic_outputs.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "acoustic_outputs.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"
+markers = ["slow: runs a real solver (k-wave-python), several seconds"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "NPY", "RUF"]
+ignore = ["E741", "RUF002", "RUF003"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src/acoustic_outputs"]
+ignore_missing_imports = true
