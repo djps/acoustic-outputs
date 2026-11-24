@@ -15,6 +15,7 @@ power and areas are per metre in y.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 from dataclasses import dataclass, field
@@ -526,6 +527,26 @@ class Results:
 
     # -- files ---------------------------------------------------------------------------
 
+    @classmethod
+    def load(cls, directory: str | Path) -> Results:
+        """The :class:`Results` that :meth:`save` wrote to ``directory`` (``results.npz`` and
+        ``results_meta.json``). Output points are not restored; their waveforms are in their files."""
+        d = Path(directory)
+        meta_path = d / "results_meta.json"
+        if not meta_path.exists():
+            raise FileNotFoundError(f"{meta_path} not found: the results were saved by an older version")
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        names = {f.name for f in dataclasses.fields(cls)}
+        kwargs: dict[str, Any] = {"grid": Grid(**meta.pop("grid"))}
+        for k, v in meta.items():
+            if k in names:
+                kwargs[k] = tuple(v) if k in ("peak_xy_index", "axis_index") and v is not None else v
+        with np.load(d / "results.npz", allow_pickle=False) as data:
+            for k in data.files:
+                if k in names:
+                    kwargs[k] = data[k]
+        return cls(**kwargs)
+
     def save(self, directory: str | Path = ".", *, harmonics: int = 4) -> list[Path]:
         """Write the outputs and return the files written:
 
@@ -533,6 +554,8 @@ class Results:
         * ``focal_plane.txt``: the focal plane: x, y, p+, p-, intensity, |P_1| .. |P_h|;
         * ``metrics.json``: :meth:`metrics`, including the focus and the spatial peak;
         * ``results.npz``: every recorded array (axis, lines, planes, power, ...);
+        * ``results_meta.json``: everything else :meth:`load` needs (the grid, the indices of the
+          focus and of the kept planes, the medium and the settings);
         * one waveform file per requested point.
         """
         d = Path(directory)
@@ -575,6 +598,15 @@ class Results:
             json.dump(self.metrics(harmonics), f, indent=2, allow_nan=True)
         arrays = {k: v for k, v in vars(self).items() if isinstance(v, np.ndarray)}
         np.savez_compressed(written[2], x=self.grid.x, y=self.grid.y, **arrays)
+        meta: dict[str, Any] = {"grid": dataclasses.asdict(self.grid)}
+        for f in dataclasses.fields(self):
+            v = getattr(self, f.name)
+            if f.name in ("grid", "points") or isinstance(v, np.ndarray) or v is None:
+                continue
+            meta[f.name] = list(v) if isinstance(v, tuple) else v
+        path = d / "results_meta.json"
+        path.write_text(json.dumps(meta, indent=2, allow_nan=True) + "\n", encoding="utf-8")
+        written.append(path)
         if self.focal_plane is not None:
             maps = self.plane_maps(self.focal_plane)
             gx, gy = np.meshgrid(self.grid.x, self.grid.y, indexing="ij")

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 import acoustic_outputs as ao
 from acoustic_outputs.synthetic import GaussianBeam
+from conftest import assert_metrics_equal
 
 
 @pytest.fixture(scope="module")
@@ -173,3 +175,15 @@ def test_side_lobe_peaks_and_level_extents() -> None:
     lobes = iec.side_lobe_peaks(res.grid.x, line_x, res.axis_ij[0])
     first = min((p for p in lobes if p["position"] > 0), key=lambda p: p["position"])
     assert first["level_dB"] == pytest.approx(m["iec"]["side_lobes"]["x"]["after_level_dB"])
+
+
+def test_save_and_load_round_trip(tmp_path: Path, beam: GaussianBeam) -> None:
+    """Results.load gives back what save wrote: the same arrays and the same metrics."""
+    res = ao.from_harmonics(beam.harmonics(), x=beam.x, y=beam.y, z=beam.z, **beam.medium(), focusing_depth=0.03)
+    res.save(tmp_path / "run")
+    back = ao.Results.load(tmp_path / "run")
+    assert back.grid == res.grid and back.focal_index == res.focal_index and back.axis_ij == res.axis_ij
+    assert np.array_equal(back.axis, res.axis) and np.array_equal(back.xz_p_plus, res.xz_p_plus)
+    assert_metrics_equal(res.metrics(), back.metrics(), 1e-12)
+    with pytest.raises(FileNotFoundError, match="older version"):
+        ao.Results.load(tmp_path)

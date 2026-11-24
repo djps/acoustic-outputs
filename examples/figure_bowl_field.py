@@ -36,6 +36,7 @@ import argparse
 import logging
 import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -78,44 +79,32 @@ def region_extent(field, level_db: float) -> tuple[float, float, float]:
     return float(z[iz.min()]), float(z[iz.max()]), float(np.abs(x[ix]).max())
 
 
-def beam_features(bowl: FocusedBowl, z_max: float, ppw: float) -> dict:
-    """Everything the axial and lateral panels mark, from this package's own outputs.
+def features_from_results(res: Any, *, axial_curves: list, lateral_curves: list) -> dict:
+    """Everything the axial and lateral panels mark, read from a :class:`~acoustic_outputs.results.Results`.
 
-    The bowl's field is simulated and recorded as any solver's output would be
-    (:func:`acoustic_outputs.benchmarks.simulate`, the Rayleigh integral on an (r, z) grid an eighth
-    of a wavelength apart, revolved and recorded into a :class:`~acoustic_outputs.results.Results`).
-    From it come the beam maximum (``Results.metrics()["focus"]``), the focal lengths and widths and
-    their ends (``metrics()``, ``Results.level_extents``), the prefocal and postfocal maxima and the
-    largest side lobes (``metrics()["iec"]["side_lobes"]``, :func:`acoustic_outputs.iec.secondary_maxima`)
-    and every side lobe (:func:`acoustic_outputs.iec.side_lobe_peaks`). The analytic axis (C.1) and a
-    finely sampled Rayleigh profile across the beam are drawn as references only.
+    The beam maximum (``Results.metrics()["focus"]``), the focal lengths and widths and their ends
+    (``metrics()``, ``Results.level_extents``), the prefocal and postfocal maxima and the largest
+    side lobes (``metrics()["iec"]["side_lobes"]``, :func:`acoustic_outputs.iec.secondary_maxima`) and
+    every side lobe (:func:`acoustic_outputs.iec.side_lobe_peaks`) all come from the package. The
+    focal quantity of ``res`` is the one marked. ``axial_curves`` and ``lateral_curves`` are what
+    the two panels draw: ``(coordinate [m], values [Pa], plot keyword arguments)``, the lateral ones
+    against x from the beam axis.
     """
-    lam = bowl.wavelength
-    r_max = max(8 * 1.41 * lam * bowl.f_number, 10 * lam)  # about eight -6 dB focal widths
-    res = simulate(bowl, spacing=lam / 8, r_max=r_max, z_range=(bowl.h + lam, z_max), method="rayleigh",
-                   points_per_wavelength=ppw)  # fmt: skip
     m = res.metrics()
     prof, line_x, _ = res.focal_lines()
     i, ix = res.focal_index, res.axis_ij[0]
     x0 = res.grid.x[ix]
-    x = res.grid.x - x0
     ext = {lv: res.level_extents(lv) for lv in LEVELS}
 
     def tag(lv: float) -> str:
         return f"{abs(lv):g}dB"
 
-    z_bm = float(m["focus"]["z"])
-    # the references: the analytic axis, and the Rayleigh integral across the beam at the beam maximum
-    za = np.linspace(bowl.h + lam, z_max, 6001)
-    dr = lam / 40
-    rr = dr * np.arange(int(np.ceil(x.max() / dr)) + 1)
-    pr = np.abs(bowl.rayleigh(rr, [z_bm], points_per_wavelength=ppw)[:, 0])
     return {
         "results": res,
-        "z_bm": z_bm,
+        "z_bm": float(m["focus"]["z"]),
         "p_bm": float(prof[i]),
-        "axial_ref": (za, np.abs(bowl.axial_pressure(za))),
-        "axial_sim": (res.z, prof),
+        "axial_curves": axial_curves,
+        "lateral_curves": lateral_curves,
         "axial_secondary": m["iec"]["side_lobes"]["axial"],
         # focal lengths: the smallest distance between crossings (IEC 61828 beam maximum depth at -6 dB)
         "focal_lengths": {
@@ -123,8 +112,6 @@ def beam_features(bowl: FocusedBowl, z_max: float, ppw: float) -> dict:
         },
         # and the outermost crossings, the secondary maxima above the level included
         "axial_extents": {lv: ext[lv]["axis"]["all_lobes"] for lv in (-12.0, -20.0)},
-        "lateral_ref": (np.concatenate([-rr[:0:-1], rr]), np.concatenate([pr[:0:-1], pr])),
-        "lateral_sim": (x, line_x),
         # focal widths: the greatest distance (IEC 62127-1, 61828), and the main lobe's
         "widths": {lv: m[f"focal_width_x_{tag(lv)}"] for lv in LEVELS},
         "width_ends": {lv: tuple(e - x0 for e in ext[lv]["x"]["all_lobes"]) for lv in LEVELS},
@@ -139,7 +126,46 @@ def beam_features(bowl: FocusedBowl, z_max: float, ppw: float) -> dict:
     }
 
 
-def figure(bowl, field, inset, feat, text_color):
+def beam_features(bowl: FocusedBowl, z_max: float, ppw: float) -> dict:
+    """The linear field's features (:func:`features_from_results`), from the package's own outputs.
+
+    The bowl's field is simulated and recorded as any solver's output would be
+    (:func:`acoustic_outputs.benchmarks.simulate`, the Rayleigh integral on an (r, z) grid an eighth
+    of a wavelength apart, revolved and recorded into a :class:`~acoustic_outputs.results.Results`).
+    The analytic axis (C.1) and a finely sampled Rayleigh profile across the beam are drawn as
+    references, with the recorded samples.
+    """
+    lam = bowl.wavelength
+    r_max = max(8 * 1.41 * lam * bowl.f_number, 10 * lam)  # about eight -6 dB focal widths
+    res = simulate(bowl, spacing=lam / 8, r_max=r_max, z_range=(bowl.h + lam, z_max), method="rayleigh",
+                   points_per_wavelength=ppw)  # fmt: skip
+    prof, line_x, _ = res.focal_lines()
+    x = res.grid.x - res.grid.x[res.axis_ij[0]]
+    z_bm = float(res.z[res.focal_index])
+    za = np.linspace(bowl.h + lam, z_max, 6001)
+    dr = lam / 40
+    rr = dr * np.arange(int(np.ceil(x.max() / dr)) + 1)
+    pr = np.abs(bowl.rayleigh(rr, [z_bm], points_per_wavelength=ppw)[:, 0])
+    step = max(1, res.z.size // 110)
+    dots = {"ls": "none", "marker": "o", "color": "#6baed6", "label": "Rayleigh field, recorded"}
+    return features_from_results(
+        res,
+        axial_curves=[
+            (za, np.abs(bowl.axial_pressure(za)), {"color": "#08519c", "lw": 1.6, "label": "analytic (C.1)"}),
+            (res.z[::step], prof[::step], {**dots, "ms": 2.3}),
+        ],
+        lateral_curves=[
+            (np.concatenate([-rr[:0:-1], rr]), np.concatenate([pr[:0:-1], pr]),
+             {"color": "#08519c", "lw": 1.4, "label": "Rayleigh integral"}),
+            (x, line_x, {**dots, "ms": 2.0}),
+        ],
+    )  # fmt: skip
+
+
+def figure(bowl, field, inset, feat, text_color, *, title=None, quantity=r"|p|", z_view=None, source_z=None):
+    """The three-panel figure. ``quantity`` is the mathtext of the mapped quantity (``|p|``, ``p_+``),
+    ``title`` the figure's title (default that of C.1), ``z_view`` the z range shown (default from 2 mm
+    before the apex to the last plane), and ``source_z`` the source plane of a marching solver."""
     import matplotlib.pyplot as plt
     from matplotlib import colors
 
@@ -186,15 +212,19 @@ def figure(bowl, field, inset, feat, text_color):
     top.tick_params(labelbottom=False)
     top.set_ylabel("x [mm]")
     title = fig.suptitle(
-        f"Focused bowl, IEC TS 63587 benchmark C.1: aperture {bowl.aperture * 1e3:g} mm, "
+        title
+        or f"Focused bowl, IEC TS 63587 benchmark C.1: aperture {bowl.aperture * 1e3:g} mm, "
         f"radius of curvature {bowl.D * 1e3:g} mm, {bowl.frequency / 1e6:g} MHz",
         fontsize=9,
     )
+    if source_z is not None:
+        top.axvline(source_z * 1e3, color="#6b7280", lw=0.8, ls="--", label="source plane")
     top_legend = top.legend(loc="upper right", fontsize=7.5, frameon=False, borderaxespad=1.2, labelcolor="#202020")
     cb = fig.colorbar(mesh, cax=cax)
     # left-aligned over the colorbar and kept out of the layout, so that it does not push the colorbar
     # away from the field map
-    cb_title = cb.ax.set_title(r"$|p|\,/\,\max|p|$" + "\n[dB]", fontsize=8, loc="left", pad=6)
+    ratio = rf"${quantity}\,/\,\max {quantity}$"
+    cb_title = cb.ax.set_title(ratio + "\n[dB]", fontsize=8, loc="left", pad=6)
     cb_title.set_in_layout(False)
 
     # inset: the focal region at a finer resolution
@@ -233,12 +263,8 @@ def figure(bowl, field, inset, feat, text_color):
                                        coordsB=top.transData, color="#6b7280", lw=0.8))  # fmt: skip
 
     # -- the axis ------------------------------------------------------------------------------
-    za, pa = feat["axial_ref"]
-    axial.plot(za * 1e3, pa / 1e6, color="#08519c", lw=1.6, label="analytic (C.1)")
-    zs, ps = feat["axial_sim"]
-    step = max(1, zs.size // 110)
-    axial.plot(zs[::step] * 1e3, ps[::step] / 1e6, "o", ms=2.3, color="#6baed6",
-               label="Rayleigh field, recorded")  # fmt: skip
+    for zc, vc, kw in feat["axial_curves"]:
+        axial.plot(np.asarray(zc) * 1e3, np.asarray(vc) / 1e6, **kw)
     axial.axvline(bowl.D * 1e3, color="black", lw=0.9, ls="--", label=f"geometric focus D = {bowl.D * 1e3:g} mm")
     axial.plot(z_bm * 1e3, pmax / 1e6, marker="x", color="#b2182b", ms=7, mew=1.5, ls="none",
                label=f"beam maximum {z_bm * 1e3:.2f} mm")  # fmt: skip
@@ -259,20 +285,19 @@ def figure(bowl, field, inset, feat, text_color):
                    zorder=1, label=label)  # fmt: skip
     # from 2 mm before the apex, so that the bowl stands clear of the left edge of the field map; the
     # ticks stay those of the field (the two panels share their z axis)
-    axial.set_xlim(z[0] * 1e3 - 2.0, z[-1] * 1e3)
-    axial.set_xticks(np.arange(0.0, z[-1] * 1e3 + 1e-9, 20.0))
+    zv0, zv1 = z_view if z_view is not None else (-2e-3, z[-1])
+    axial.set_xlim(zv0 * 1e3, zv1 * 1e3)
+    axial.set_xticks(np.arange(0.0, zv1 * 1e3 + 1e-9, 20.0))
     axial.set_ylim(0, 1.12 * pmax / 1e6)
     axial.set_xlabel("z from the bowl's apex [mm]")
-    axial.set_ylabel(r"$|p|$ on axis [MPa]")
+    axial.set_ylabel("pressure on axis [MPa]" if quantity != "|p|" else r"$|p|$ on axis [MPa]")
     leg = axial.legend(loc="upper left", fontsize=6.5, frameon=False, ncols=2, columnspacing=1.0, handlelength=1.6)
     leg.set_in_layout(False)  # it lies within the panel; it must not move the colorbar
     axial.grid(alpha=0.25)
 
     # -- across the beam at the beam maximum ------------------------------------------------------------
-    xl, pl = feat["lateral_ref"]
-    lateral.plot(xl * 1e3, db(pl), color="#08519c", lw=1.4, label="Rayleigh integral")
-    xs_, ps_ = feat["lateral_sim"]
-    lateral.plot(xs_ * 1e3, db(ps_), "o", ms=2.0, color="#6baed6", label="Rayleigh field, recorded")
+    for xc, vc, kw in feat["lateral_curves"]:
+        lateral.plot(np.asarray(xc) * 1e3, db(np.abs(vc)), **kw)
     half = 0.5 * np.array([feat["main_lobe_widths"][lv] for lv in LEVELS])
     for lv, w in feat["widths"].items():
         c = LEVEL_COLORS[lv]
@@ -299,7 +324,7 @@ def figure(bowl, field, inset, feat, text_color):
     lateral.plot([], [], marker="o", mfc="none", color="#7b3294", ms=4, mew=0.9, ls="none", label="side lobes")
     # two legends: the curves and the side lobes on the left, the widths on the right
     handles, labels = lateral.get_legend_handles_labels()
-    curves = [k for k, lab in enumerate(labels) if lab.startswith("Rayleigh") or lab == "side lobes"]
+    curves = [k for k, lab in enumerate(labels) if " dB " not in lab]  # the widths are "-3 dB ..."
     widths = [k for k in range(len(labels)) if k not in curves]
     left = lateral.legend([handles[k] for k in curves], [labels[k] for k in curves], loc="upper left", fontsize=7,
                           frameon=False)  # fmt: skip
@@ -310,7 +335,7 @@ def figure(bowl, field, inset, feat, text_color):
     lateral.set_xlim(-span, span)
     lateral.set_ylim(-40, 3)
     lateral.set_xlabel(f"x [mm], in the plane of the beam maximum (z = {z_bm * 1e3:.2f} mm)")
-    lateral.set_ylabel(r"$|p|\,/\,\max|p|$ [dB]")
+    lateral.set_ylabel(ratio + " [dB]")
     lateral.grid(alpha=0.25)
     for ax in (top, axial, lateral):
         ax.set_facecolor("none")
