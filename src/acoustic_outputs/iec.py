@@ -132,27 +132,64 @@ def spatial_average(harmonics: ComplexArray, grid: Grid, diameter: float) -> Com
 # -- beam shape ---------------------------------------------------------------------------
 
 
-def secondary_maxima(
-    coord: RealArray, values: RealArray, index: int, lobe_db: float = -6.0, floor_db: float = -120.0
-) -> dict[str, float]:
-    """Largest maxima outside the main lobe around ``index``, on either side.
+def main_lobe_bounds(values: RealArray, index: int, lobe_db: float = -6.0) -> tuple[int, int]:
+    """Indices of the ends of the main lobe around ``index``.
 
-    The main lobe extends on each side until the profile has fallen below ``lobe_db``
-    (relative to ``values[index]``) and then reached a local minimum, so ripples on the main
-    lobe are not counted as side lobes. Levels are amplitude ratios (20 log10), for pressure
-    profiles. Returns, for ``before`` and ``after`` (lower and higher ``coord``), the value,
-    its position and its level in dB (NaN if there is no secondary maximum on that side).
-    Maxima below ``floor_db`` are round-off in the tail of the profile, not side lobes.
+    The main lobe extends on each side until the profile has fallen below ``lobe_db`` (relative
+    to ``values[index]``) and then reached a local minimum, so ripples on the main lobe are not
+    counted as side lobes.
     """
     v = np.asarray(values, dtype=float)
-    peak = v[index]
-    level = 10 ** (lobe_db / 20) * peak
+    level = 10 ** (lobe_db / 20) * v[index]
     lo = index
     while lo > 0 and (v[lo] >= level or v[lo - 1] <= v[lo]):
         lo -= 1
     hi = index
     while hi < v.size - 1 and (v[hi] >= level or v[hi + 1] <= v[hi]):
         hi += 1
+    return lo, hi
+
+
+def side_lobe_peaks(
+    coord: RealArray, values: RealArray, index: int, lobe_db: float = -6.0, floor_db: float = -120.0
+) -> list[dict[str, float]]:
+    """Every maximum outside the main lobe around ``index`` (:func:`main_lobe_bounds`), in order of position.
+
+    Each is ``position``, ``value`` and ``level_dB`` (20 log10 of the value over ``values[index]``,
+    for pressure profiles). A maximum is a sample above the one before it and not below the one
+    after it; maxima below ``floor_db`` are round-off in the tail of the profile and are left out.
+    Along a line across the beam these are the side lobes; along the beam axis, the prefocal
+    and postfocal maxima. The largest on each side are :func:`secondary_maxima`.
+    """
+    v = np.asarray(values, dtype=float)
+    peak = v[index]
+    if not peak > 0:
+        return []
+    lo, hi = main_lobe_bounds(v, index, lobe_db)
+    floor = 10 ** (floor_db / 20) * peak
+    out = []
+    for j in [*range(1, lo), *range(hi + 1, v.size - 1)]:
+        if v[j] > v[j - 1] and v[j] >= v[j + 1] and v[j] > floor:
+            out.append({"position": float(coord[j]), "value": float(v[j]),
+                        "level_dB": float(20 * math.log10(v[j] / peak))})  # fmt: skip
+    return out
+
+
+def secondary_maxima(
+    coord: RealArray, values: RealArray, index: int, lobe_db: float = -6.0, floor_db: float = -120.0
+) -> dict[str, float]:
+    """Largest maxima outside the main lobe around ``index``, on either side.
+
+    The main lobe is that of :func:`main_lobe_bounds`, so ripples on the main lobe are not
+    counted as side lobes. Levels are amplitude ratios (20 log10), for pressure profiles. Returns,
+    for ``before`` and ``after`` (lower and higher ``coord``), the value, its position and its level
+    in dB (NaN if there is no secondary maximum on that side). Maxima below ``floor_db`` are
+    round-off in the tail of the profile, not side lobes. All of the maxima are
+    :func:`side_lobe_peaks`.
+    """
+    v = np.asarray(values, dtype=float)
+    peak = v[index]
+    lo, hi = main_lobe_bounds(v, index, lobe_db)
     out: dict[str, float] = {}
     for side, seg, off, edge in (("before", v[:lo], 0, v[lo]), ("after", v[hi + 1 :], hi + 1, v[hi])):
         # a maximum needs a rise into it: a monotonic run to the domain edge has none

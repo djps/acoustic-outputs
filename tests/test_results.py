@@ -105,3 +105,71 @@ def test_recorder_checks(beam: GaussianBeam) -> None:
         ao.PlaneRecorder(g, 1, frequency=1e6, sound_speed=1500.0, impedance=1.5e6, axis_index=(4, 0))
     with pytest.raises(ValueError, match="no plane"):
         ao.PlaneRecorder(g, 1, frequency=1e6, sound_speed=1500.0, impedance=1.5e6).finish()
+
+
+def test_beamwidth_is_the_greatest_distance() -> None:
+    """Across the beam the width is the greatest distance between level crossings (IEC 62127-1,
+    61828): side lobes above the level are inside it. The main lobe's width is kept beside it."""
+    from acoustic_outputs.results import area_above, beamwidth_at_level, connected_area, width_at_level
+
+    x = np.linspace(-10, 10, 2001)
+    v = np.exp(-(x**2)) + 0.2 * np.exp(-((np.abs(x) - 4) ** 2) / 0.2)  # a main lobe and side lobes at 0.2
+    i = 1000
+    assert beamwidth_at_level(x, v, 0.5) == pytest.approx(width_at_level(x, v, i, 0.5))  # above the lobes
+    main = width_at_level(x, v, i, 0.1)
+    full = beamwidth_at_level(x, v, 0.1)
+    assert main == pytest.approx(2 * np.sqrt(np.log(10)), rel=1e-4)
+    assert full == pytest.approx(2 * (4 + np.sqrt(0.2 * np.log(2))), rel=1e-3)  # to the side lobes' outer edges
+    assert math.isnan(beamwidth_at_level(x, v, 0.0))  # at or above the level at the ends: not resolved
+    plane = np.add.outer(v, v) / 2
+    assert area_above(plane, 0.15, 1.0) > connected_area(plane, (i, i), 0.15, 1.0)
+
+
+def test_focal_widths_include_side_lobes() -> None:
+    """A focused bowl's first side lobes (-16.8 dB) are inside its -20 dB width, not its -12 dB one."""
+    from acoustic_outputs.benchmarks import FocusedBowl, simulate
+
+    bowl = FocusedBowl()  # C.2's transducer: deep nulls between the lobes in the focal plane
+    res = simulate(bowl, spacing=bowl.wavelength / 6, r_max=5e-3, z_range=(85e-3, 95e-3), method="rayleigh")
+    m = res.metrics()
+    assert m["focal_width_x_12dB"] == pytest.approx(m["focal_width_x_12dB_main_lobe"], rel=1e-12)
+    assert m["focal_width_x_20dB"] > 1.5 * m["focal_width_x_20dB_main_lobe"]
+    assert m["focal_width_y_20dB"] == pytest.approx(m["focal_width_x_20dB"], rel=1e-9)
+    assert m["focal_area_20dB"] > m["focal_area_20dB_main_lobe"]
+    assert m["focal_area_6dB"] == pytest.approx(m["focal_area_6dB_main_lobe"])
+    lobes = m["iec"]["side_lobes"]["x"]
+    assert -20 < lobes["after_level_dB"] < -12
+
+
+def test_side_lobe_peaks_and_level_extents() -> None:
+    """All the side lobes, of which secondary_maxima are the largest; and level_extents behind the metrics."""
+    from acoustic_outputs import iec
+    from acoustic_outputs.benchmarks import FocusedBowl, simulate
+
+    x = np.linspace(-10, 10, 2001)
+    v = np.exp(-(x**2)) + 0.2 * np.exp(-((np.abs(x) - 4) ** 2) / 0.2) + 0.1 * np.exp(-((np.abs(x) - 7) ** 2) / 0.2)
+    peaks = iec.side_lobe_peaks(x, v, 1000)
+    assert [round(p["position"], 6) for p in peaks] == [-7.0, -4.0, 4.0, 7.0]
+    assert peaks[1]["level_dB"] == pytest.approx(20 * np.log10(0.2 + np.exp(-16)), abs=1e-6)
+    sec = iec.secondary_maxima(x, v, 1000)
+    assert sec["before_position"] == peaks[1]["position"] and sec["after_position"] == peaks[2]["position"]
+
+    bowl = FocusedBowl()
+    res = simulate(bowl, spacing=bowl.wavelength / 6, r_max=5e-3, z_range=(60e-3, 115e-3), method="rayleigh")
+    m = res.metrics()
+    for lv in (-6.0, -20.0):
+        ext = res.level_extents(lv)
+        tag = f"{abs(lv):g}dB"
+        assert m[f"focal_length_{tag}"] == pytest.approx(np.diff(ext["axis"]["main_lobe"])[0])
+        assert m[f"focal_width_x_{tag}"] == pytest.approx(np.diff(ext["x"]["all_lobes"])[0])
+        assert m[f"focal_width_x_{tag}_main_lobe"] == pytest.approx(np.diff(ext["x"]["main_lobe"])[0])
+    # along the axis at -20 dB the prefocal and postfocal maxima (about -12 and -15 dB) lie outside the
+    # focal length but inside the outermost crossings
+    ext = res.level_extents(-20.0)["axis"]
+    axial = m["iec"]["side_lobes"]["axial"]
+    assert ext["all_lobes"][0] < axial["before_position"] < ext["main_lobe"][0]
+    assert ext["main_lobe"][1] < axial["after_position"] < ext["all_lobes"][1]
+    _, line_x, _ = res.focal_lines()
+    lobes = iec.side_lobe_peaks(res.grid.x, line_x, res.axis_ij[0])
+    first = min((p for p in lobes if p["position"] > 0), key=lambda p: p["position"])
+    assert first["level_dB"] == pytest.approx(m["iec"]["side_lobes"]["x"]["after_level_dB"])

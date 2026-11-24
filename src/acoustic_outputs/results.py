@@ -31,10 +31,11 @@ from acoustic_outputs.waveform import peak_pressures, waveform
 FocalQuantity = Literal["p_positive", "p_negative", "first_harmonic"]
 
 
-def width_at_level(coord: RealArray, values: RealArray, index: int, level: float) -> float:
-    """Width of the region around ``index`` where ``values >= level``, interpolated linearly.
+def main_lobe_crossings(coord: RealArray, values: RealArray, index: int, level: float) -> tuple[float, float]:
+    """Where ``values`` fall to ``level`` either side of ``index``, interpolated linearly: the ends
+    of the contiguous region around ``index`` where ``values >= level`` (the main lobe).
 
-    Returns NaN if the region reaches an end of the array (the width is not resolved).
+    NaN if the region reaches an end of the array (it is not resolved).
     """
     v = np.asarray(values, dtype=float)
     lo = hi = index
@@ -43,14 +44,60 @@ def width_at_level(coord: RealArray, values: RealArray, index: int, level: float
     while hi < v.size - 1 and v[hi + 1] >= level:
         hi += 1
     if lo == 0 or hi == v.size - 1:
-        return math.nan
+        return math.nan, math.nan
     cl = coord[lo - 1] + (level - v[lo - 1]) / (v[lo] - v[lo - 1]) * (coord[lo] - coord[lo - 1])
     cu = coord[hi] + (level - v[hi]) / (v[hi + 1] - v[hi]) * (coord[hi + 1] - coord[hi])
-    return float(cu - cl)
+    return float(cl), float(cu)
+
+
+def width_at_level(coord: RealArray, values: RealArray, index: int, level: float) -> float:
+    """Width of the contiguous region around ``index`` where ``values >= level`` (:func:`main_lobe_crossings`).
+
+    This is the extent of the main lobe alone: the *smallest* distance between two level
+    crossings either side of ``index``. It is the definition of a focal length along the axis
+    (the beam maximum depth of IEC 61828; IEC TS 63587, 3.16). Across the beam the standards
+    use the greatest distance instead (:func:`beamwidth_at_level`). Returns NaN if the region
+    reaches an end of the array (the width is not resolved).
+    """
+    lo, hi = main_lobe_crossings(coord, values, index, level)
+    return hi - lo
+
+
+def level_crossings(coord: RealArray, values: RealArray, level: float) -> tuple[float, float]:
+    """The outermost positions where ``values`` reach ``level``, interpolated linearly.
+
+    NaN if no value reaches the level, or if the values are at or above it at an end of the
+    array (the extent is not resolved).
+    """
+    v = np.asarray(values, dtype=float)
+    above = np.flatnonzero(v >= level)
+    if above.size == 0 or above[0] == 0 or above[-1] == v.size - 1:
+        return math.nan, math.nan
+    lo, hi = int(above[0]), int(above[-1])
+    cl = coord[lo - 1] + (level - v[lo - 1]) / (v[lo] - v[lo - 1]) * (coord[lo] - coord[lo - 1])
+    cu = coord[hi] + (level - v[hi]) / (v[hi + 1] - v[hi]) * (coord[hi + 1] - coord[hi])
+    return float(cl), float(cu)
+
+
+def beamwidth_at_level(coord: RealArray, values: RealArray, level: float) -> float:
+    """Beamwidth at ``level``: the greatest distance between two points where ``values`` reach it.
+
+    This is the beamwidth of IEC 62127-1 and IEC 61828: the outermost level crossings on the
+    line, so side lobes above the level are inside the width. Below the level of the highest
+    side lobe it is wider than the main lobe (:func:`width_at_level`). NaN if not resolved.
+    """
+    lo, hi = level_crossings(coord, values, level)
+    return hi - lo
+
+
+def area_above(values: RealArray, level: float, cell: float) -> float:
+    """Area [m^2] of all the points where ``values >= level``: the beam area of IEC 62127-1 (and,
+    plane by plane, the beam maximum volume of IEC 61828 / TS 63587, 3.18), side lobes included."""
+    return float(np.count_nonzero(np.asarray(values) >= level) * cell)
 
 
 def connected_area(values: RealArray, seed: tuple[int, int], level: float, cell: float) -> float:
-    """Area [m^2] of the 4-connected region around ``seed`` where ``values >= level``."""
+    """Area [m^2] of the 4-connected region around ``seed`` where ``values >= level``: the main lobe's."""
     from scipy.ndimage import label
 
     labels, _ = label(values >= level)
@@ -216,27 +263,67 @@ class Results:
         """Pulse-intensity integral over one period on the axis [J/m^2], (nrec,)."""
         return iec.pulse_integrals(self.axis, self.frequency, self.impedance, axis=1)[1]
 
-    def _level_metrics(self, level_db: float) -> dict[str, float]:
-        """Focal length, widths and area at ``level_db`` below the focal value."""
+    def focal_lines(self) -> tuple[RealArray, RealArray, RealArray]:
+        """The focal quantity along the beam axis, and along the x and y lines through the axis in the
+        focal plane: (nrec,), (nx,), (ny,)."""
         q = self.focal_quantity
-        prof = self.axial(q)
-        i = self.focal_index
-        g = self.grid
-        ix, iy = self.axis_ij
-        level = 10 ** (level_db / 20) * prof[i]
         lines = {
             "p_positive": (self.xz_p_plus, self.yz_p_plus),
             "p_negative": (np.abs(self.xz_p_minus), np.abs(self.yz_p_minus)),
             "first_harmonic": (self.xz_amplitude, self.yz_amplitude),
         }[q]
+        i = self.focal_index
+        return self.axial(q), np.asarray(lines[0][i]), np.asarray(lines[1][i])
+
+    def level_extents(self, level_db: float) -> dict[str, Any]:
+        """Where the focal quantity crosses ``level_db`` (relative to its focal value) along the beam axis
+        and along the x and y lines through the focus.
+
+        For each of ``axis``, ``x`` and ``y``: ``main_lobe``, the crossings either side of the focus
+        (:func:`main_lobe_crossings`), and ``all_lobes``, the outermost crossings
+        (:func:`level_crossings`), as (start, end) positions [m]. The focal lengths of ``metrics()``
+        are ``axis.main_lobe`` (the smallest distance, IEC 61828), the focal widths ``x.all_lobes``
+        and ``y.all_lobes`` (the greatest distance, IEC 62127-1), with ``*_main_lobe`` widths from
+        ``x.main_lobe`` and ``y.main_lobe``. ``level`` is the level itself.
+        """
+        prof, line_x, line_y = self.focal_lines()
+        i = self.focal_index
+        ix, iy = self.axis_ij
+        g = self.grid
+        level = 10 ** (level_db / 20) * prof[i]
+        out: dict[str, Any] = {"level": float(level)}
+        for name, coord, values, index in (("axis", self.z, prof, i), ("x", g.x, line_x, ix), ("y", g.y, line_y, iy)):
+            out[name] = {
+                "main_lobe": main_lobe_crossings(coord, values, index, level),
+                "all_lobes": level_crossings(coord, values, level),
+            }
+        return out
+
+    def _level_metrics(self, level_db: float) -> dict[str, float]:
+        """Focal length, widths and area at ``level_db`` below the focal value (see :meth:`level_extents`)."""
+        g = self.grid
+        ix, iy = self.axis_ij
+        ext = self.level_extents(level_db)
+        level = ext["level"]
         lvl = f"{abs(level_db):g}dB"
+
+        def span(pair: tuple[float, float]) -> float:
+            return pair[1] - pair[0]
+
+        # lengths along the axis: the smallest distance (IEC 61828 beam maximum depth); widths and
+        # areas across the beam: the greatest distance and all points (IEC 62127-1, 61828), with
+        # the main lobe's alone beside them
         out = {
-            f"focal_length_{lvl}": width_at_level(self.z, prof, i, level),
-            f"focal_width_x_{lvl}": width_at_level(g.x, lines[0][i], ix, level),
-            f"focal_width_y_{lvl}": width_at_level(g.y, lines[1][i], iy, level),
+            f"focal_length_{lvl}": span(ext["axis"]["main_lobe"]),
+            f"focal_width_x_{lvl}": span(ext["x"]["all_lobes"]),
+            f"focal_width_y_{lvl}": span(ext["y"]["all_lobes"]),
+            f"focal_width_x_{lvl}_main_lobe": span(ext["x"]["main_lobe"]),
+            f"focal_width_y_{lvl}_main_lobe": span(ext["y"]["main_lobe"]),
         }
         if self.focal_plane is not None:
-            out[f"focal_area_{lvl}"] = connected_area(self._focal_map(), (ix, iy), level, g.dx * g.dy)
+            fmap = self._focal_map()
+            out[f"focal_area_{lvl}"] = area_above(fmap, level, g.dx * g.dy)
+            out[f"focal_area_{lvl}_main_lobe"] = connected_area(fmap, (ix, iy), level, g.dx * g.dy)
         return out
 
     def _focal_map(self) -> RealArray:
@@ -381,10 +468,7 @@ class Results:
                     out["I_spta_focal_plane_exact"] = float(iz.max())
                     lvl = 10 ** (self.levels_db[0] / 20) * prof[i]
                     fmap = self._focal_map()
-                    from scipy.ndimage import label
-
-                    labels, _ = label(fmap >= lvl)
-                    region = labels == labels[ix, iy] if labels[ix, iy] else np.zeros_like(fmap, dtype=bool)
+                    region = fmap >= lvl  # the focal area: all points above the level, as focal_area_*
                     pw_i = self.intensity(plane)
                     tag = f"{abs(self.levels_db[0]):g}dB"
                     out[f"power_in_focal_area_{tag}"] = float(pw_i[region].sum() * cell)
