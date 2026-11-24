@@ -16,7 +16,7 @@ import pytest
 
 import acoustic_outputs as ao
 from acoustic_outputs import synthetic
-from acoustic_outputs.preprocess import HarmonicFit, fdtd, spectral, time_domain
+from acoustic_outputs.preprocess import HarmonicFit, fdtd, frequency_domain, spectral, time_domain
 from acoustic_outputs.synthetic import GaussianBeam
 from conftest import assert_metrics_equal
 
@@ -26,7 +26,7 @@ F0 = 1e6
 def test_layouts_and_conventions(coarse: GaussianBeam, coarse_ref: ao.Results) -> None:
     """Axes (x, y, z, k), absolute phase, exp(-i omega t): the same field."""
     d = synthetic.harmonics_dataset(coarse, absolute=True)
-    out = spectral.from_harmonics(
+    out = frequency_domain.from_harmonics(
         d["harmonics"].conj(), layout="xyzk", x=coarse.x, y=coarse.y, z=coarse.z, phase="absolute", time_sign=-1,
         **coarse.medium(),
     )  # fmt: skip
@@ -36,7 +36,7 @@ def test_layouts_and_conventions(coarse: GaussianBeam, coarse_ref: ao.Results) -
 def test_single_harmonic(coarse: GaussianBeam) -> None:
     """A CW field without a harmonic axis."""
     h = coarse.harmonics()[:, 0]
-    out = spectral.from_harmonics(h, layout="zxy", x=coarse.x, y=coarse.y, z=coarse.z, **coarse.medium())
+    out = frequency_domain.from_harmonics(h, layout="zxy", x=coarse.x, y=coarse.y, z=coarse.z, **coarse.medium())
     assert out.axis.shape == (coarse.z.size, 1)
     np.testing.assert_allclose(out.axis[:, 0], h[:, 16, 16])
 
@@ -92,7 +92,7 @@ def test_fdtd_2d(flat: GaussianBeam) -> None:
     """A 2D FDTD record (x axial, y lateral) against the same field given as harmonics."""
     beam = GaussianBeam(waist=flat.waist, x=flat.x[::2], y=None, z=flat.z[::5])
     d = synthetic.fdtd_dataset(beam)
-    ref = spectral.from_harmonics(beam.harmonics()[..., 0], layout="zkx", x=beam.x, z=beam.z, **beam.medium())
+    ref = frequency_domain.from_harmonics(beam.harmonics()[..., 0], layout="zkx", x=beam.x, z=beam.z, **beam.medium())
     out = fdtd.from_time_series(d["p"], d["dt"], coords={"x": d["x"], "y": d["y"]}, n_harmonics=4, **beam.medium())
     assert out.grid.ny == 1
     assert_metrics_equal(ref.metrics(), out.metrics(), 1e-8)
@@ -130,15 +130,15 @@ def test_not_steady_is_reported(caplog: pytest.LogCaptureFixture) -> None:
 
 def test_layout_and_sensor_errors() -> None:
     with pytest.raises(ValueError, match="layout"):
-        spectral.standard_layout(np.zeros((2, 3, 4)), "zkxy")
+        frequency_domain.standard_layout(np.zeros((2, 3, 4)), "zkxy")
     with pytest.raises(ValueError, match="layout"):
-        spectral.standard_layout(np.zeros((2, 3)), "kx")
+        frequency_domain.standard_layout(np.zeros((2, 3)), "kx")
     with pytest.raises(ValueError, match="uniformly"):
-        spectral.from_harmonics(
+        frequency_domain.from_harmonics(
             np.zeros((2, 3)), layout="zx", x=[0, 1, 3], z=[0, 1], frequency=F0, sound_speed=1.0, density=1.0
         )
     with pytest.raises(ValueError, match="increase"):
-        spectral.from_harmonics(
+        frequency_domain.from_harmonics(
             np.zeros((2, 3)), layout="zx", x=[0, 1, 2], z=[1, 0], frequency=F0, sound_speed=1.0, density=1.0
         )
     mask = np.zeros((4, 4), dtype=bool)
@@ -154,3 +154,7 @@ def test_layout_and_sensor_errors() -> None:
     sparse = SimpleNamespace(is_sparse_grid=True)
     with pytest.raises(NotImplementedError):
         fdtd.from_fullwave(np.zeros((1, 1)), sparse, SimpleNamespace(f0=F0, c0=1500.0), density=1000.0)
+
+
+def test_spectral_is_the_former_name_of_frequency_domain() -> None:
+    assert spectral.from_harmonics is frequency_domain.from_harmonics

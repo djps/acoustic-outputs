@@ -39,7 +39,7 @@ from typing import Any, Literal
 import numpy as np
 
 from acoustic_outputs._types import RealArray
-from acoustic_outputs.preprocess.spectral import from_harmonics
+from acoustic_outputs.preprocess.frequency_domain import from_harmonics
 from acoustic_outputs.recorder import RecordSettings
 from acoustic_outputs.results import Results
 
@@ -86,7 +86,7 @@ def from_babelbrain(
         direction: the direction of propagation along z (``"auto"`` decides from the power on
             the first and last planes).
         settings, axis_xy, alpha, focusing_depth: as in
-            :func:`acoustic_outputs.preprocess.spectral.from_harmonics`; ``axis_xy`` defaults to
+            :func:`acoustic_outputs.preprocess.frequency_domain.from_harmonics`; ``axis_xy`` defaults to
             the target.
     """
     if isinstance(data, (str, Path)):

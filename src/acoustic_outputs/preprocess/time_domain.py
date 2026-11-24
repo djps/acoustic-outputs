@@ -75,7 +75,7 @@ def from_time_series(
         start_time: time of the first sample [s].
         detrend: also fit a linear drift (see :mod:`acoustic_outputs.preprocess.fdtd`).
         settings, axis_xy, alpha, focusing_depth: as in
-            :func:`acoustic_outputs.preprocess.spectral.from_harmonics`.
+            :func:`acoustic_outputs.preprocess.frequency_domain.from_harmonics`.
     """
     grid, planes = time_series_planes(
         p,

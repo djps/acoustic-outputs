@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -30,6 +31,70 @@ def assert_metrics_equal(a: Any, b: Any, rtol: float, path: str = "") -> None:
             assert math.isnan(a) and math.isnan(b), (path, a, b)
         else:
             assert b == pytest.approx(a, rel=rtol, abs=rtol * 1e-3), (path, a, b)
+
+
+def metrics_close(ref: Any, got: Any, rtol: float) -> None:
+    """As assert_metrics_equal, less the quantities that are zero by symmetry (round-off)."""
+    zero = ("x", "y", "x0", "y0", "slope_x", "slope_y", "tilt")
+
+    def strip(d: Any) -> Any:
+        if isinstance(d, dict):
+            return {k: strip(v) for k, v in d.items() if k not in zero}
+        return d
+
+    assert_metrics_equal(strip(ref), strip(got), rtol)
+
+
+def write_dolfinx_xdmf(
+    path: Path, points: np.ndarray, cells: np.ndarray, functions: dict, topology: str = "Triangle"
+) -> Path:
+    """An XDMF file laid out as DOLFINx's XDMFFile writes a mesh and functions.
+
+    ``functions`` maps a name to a list of (time, values); complex values are written as
+    ``real_<name>`` and ``imag_<name>``.
+    """
+    import h5py
+
+    h5 = path.with_suffix(".h5")
+    n, (m, per) = len(points), cells.shape
+    geom = points if points.shape[1] == 3 else np.column_stack([points, np.zeros(n)])
+    atts: list[tuple[str, float, np.ndarray]] = []
+    for name, items in functions.items():
+        for t, v in items:
+            if np.iscomplexobj(v):
+                atts += [(f"real_{name}", t, v.real), (f"imag_{name}", t, v.imag)]
+            else:
+                atts.append((name, t, v))
+    with h5py.File(h5, "w") as f:
+        f["Mesh/mesh/geometry"] = geom
+        f["Mesh/mesh/topology"] = cells.astype(np.int64)
+        for name, t, v in atts:
+            f[f"Function/{name}/{str(t).replace('.', '_')}"] = v[:, None]
+    times = sorted({t for _, t, _ in atts})
+    grids = []
+    for t in times:
+        a = "".join(
+            f'<Attribute Name="{name}" AttributeType="Scalar" Center="Node"><DataItem Dimensions="{n} 1" '
+            f'Format="HDF">{h5.name}:/Function/{name}/{str(t).replace(".", "_")}</DataItem></Attribute>'
+            for name, tt, _ in atts
+            if tt == t
+        )
+        grids.append(
+            f'<Grid Name="f" GridType="Uniform"><xi:include xpointer="xpointer(/Xdmf/Domain/'
+            f"Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])\" />"
+            f'<Time Value="{t!r}" />{a}</Grid>'
+        )
+    path.write_text(
+        '<?xml version="1.0"?>\n<!DOCTYPE Xdmf SYSTEM "Xdmf.dtd" []>\n'
+        '<Xdmf Version="3.0" xmlns:xi="http://www.w3.org/2001/XInclude"><Domain>'
+        f'<Grid Name="mesh" GridType="Uniform"><Topology TopologyType="{topology}" NumberOfElements="{m}" '
+        f'NodesPerElement="{per}"><DataItem Dimensions="{m} {per}" NumberType="Int" Format="HDF">{h5.name}:'
+        f'/Mesh/mesh/topology</DataItem></Topology><Geometry GeometryType="XYZ"><DataItem '
+        f'Dimensions="{n} 3" Format="HDF">{h5.name}:/Mesh/mesh/geometry</DataItem></Geometry></Grid>'
+        '<Grid Name="f" GridType="Collection" CollectionType="Temporal">' + "".join(grids) + "</Grid>"
+        "</Domain></Xdmf>"
+    )
+    return path
 
 
 @pytest.fixture(scope="session")

@@ -41,7 +41,7 @@ from typing import Any
 import numpy as np
 
 from acoustic_outputs._types import RealArray
-from acoustic_outputs.preprocess.spectral import from_harmonics
+from acoustic_outputs.preprocess.frequency_domain import from_harmonics
 from acoustic_outputs.preprocess.time_domain import from_time_series, sensor_block
 from acoustic_outputs.recorder import RecordSettings
 from acoustic_outputs.results import Results
@@ -107,7 +107,7 @@ def from_msound(
             mSOUND's centred grid.
         z0: position of the source plane [m].
         settings, axis_xy, alpha, focusing_depth: as in
-            :func:`acoustic_outputs.preprocess.spectral.from_harmonics`.
+            :func:`acoustic_outputs.preprocess.frequency_domain.from_harmonics`.
     """
     p1 = np.asarray(p_fundamental)
     if p1.ndim not in (2, 3):

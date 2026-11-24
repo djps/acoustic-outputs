@@ -42,7 +42,7 @@ import numpy as np
 
 from acoustic_outputs._types import RealArray
 from acoustic_outputs.preprocess._common import phase_convention
-from acoustic_outputs.preprocess.spectral import from_harmonics
+from acoustic_outputs.preprocess.frequency_domain import from_harmonics
 from acoustic_outputs.preprocess.time_domain import from_time_series
 from acoustic_outputs.recorder import RecordSettings
 from acoustic_outputs.results import Results
@@ -106,7 +106,7 @@ def from_focus(
         n_harmonics, periods, window_start: the fit of a transient, as in
             :func:`acoustic_outputs.preprocess.time_domain.from_time_series`.
         settings, axis_xy, alpha, focusing_depth: as in
-            :func:`acoustic_outputs.preprocess.spectral.from_harmonics`.
+            :func:`acoustic_outputs.preprocess.frequency_domain.from_harmonics`.
     """
     p = np.asarray(pressure)
     xv, yv, zv = (np.atleast_1d(np.asarray(v, dtype=float)).ravel() for v in (x, y, z))

@@ -30,8 +30,8 @@ pyWave3D marches the harmonics P_n(x, y), n = 1 … K, of a periodic waveform in
 Everything below uses only these three operations on planes the march already produces, so recording costs no extra propagation. The domain is periodic in x and y and the field is one-way (no reflections), which limits where results are valid: the field must stay away from the lateral edges, or an absorbing layer must be used.
 
 **Other solvers.** The same computations apply to any solver whose output is reduced to such planes of harmonics, and `acoustic_outputs.preprocess` does that reduction:
-- frequency-domain pseudo-spectral output is already in this form (`spectral`);
-- time-domain pseudo-spectral (k-wave-python) and FDTD (fullwave25) records are fitted for their harmonics over a steady window (`time_domain`, `fdtd`).
+- frequency-domain output is already in this form (`frequency_domain`, and `axisymmetric_frequency_domain` and `unstructured_frequency_domain` for meshes);
+- time-domain pseudo-spectral (k-wave-python) and FDTD (fullwave25) records are fitted for their harmonics over a steady window (`time_domain`, `fdtd`, and `axisymmetric_time_domain` and `unstructured_time_domain` for meshes).
 
 `PlaneRecorder` then records every parameter below in the same way. The one-way exact intensity treats each plane's field as travelling in +z, which holds for a beam away from reflectors. Fields from a time-domain solver may also contain reflected waves, so the exact intensity is then an approximation.
 

@@ -4,7 +4,7 @@
                      [--set KEY=VALUE ...] [--point NAME X Y Z ...] [-q | -v]
     acoustic-outputs --example KIND FILE      # write a synthetic dataset of KIND to try it
 
-``DATA`` is a ``.npz``, ``.mat`` or HDF5 file (see :mod:`acoustic_outputs.datasets`); the outputs
+``DATA`` is a ``.npz``, ``.mat``, HDF5 or DOLFINx ``.xdmf`` file (see :mod:`acoustic_outputs.datasets`); the outputs
 (``metrics.json``, ``axial.txt``, ``planes.txt``, ``focal_plane.txt``, ``results.npz`` and the
 point waveforms) are written to ``DIR`` (default ``./outputs``).
 """
@@ -49,6 +49,12 @@ def _example(kind: str, path: Path) -> Path:
         "babelbrain": lambda: synthetic.babelbrain_dataset(beam),
         "msound": lambda: synthetic.msound_dataset(beam),
         "focus": lambda: synthetic.focus_dataset(synthetic.GaussianBeam(z=np.linspace(15e-3, 45e-3, 121))),
+        "axisymmetric": lambda: synthetic.axisymmetric_dataset(beam),
+        "unstructured": lambda: synthetic.unstructured_mesh(
+            synthetic.GaussianBeam(
+                x=np.linspace(-5e-3, 5e-3, 21), y=np.linspace(-5e-3, 5e-3, 21), z=np.linspace(20e-3, 40e-3, 41)
+            )
+        ),
     }[kind]()
     return save_dataset(path, kind, **data)
 
@@ -78,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="acoustic-outputs",
         description="Acoustic field parameters (IEC and beam metrics) of a solver's output.",
     )
-    parser.add_argument("data", nargs="?", type=Path, help="dataset file (.npz, .mat, .h5)")
+    parser.add_argument("data", nargs="?", type=Path, help="dataset file (.npz, .mat, .h5, .xdmf)")
     parser.add_argument("--kind", choices=KINDS, help="kind of solver output (default: the file's 'kind')")
     parser.add_argument("-o", "--output", type=Path, default=Path("outputs"), help="output directory")
     parser.add_argument("--frequency", type=float, help="base frequency [Hz]")

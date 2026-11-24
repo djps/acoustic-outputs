@@ -71,10 +71,14 @@ class GaussianBeam:
 
     def harmonics(self) -> ComplexArray:
         """Retarded harmonics on the planes, (nz, K, nx, ny) (ny = 1 in 2D)."""
-        z = self.z[:, None, None]
-        x = self.x[None, :, None]
-        y = (self.y if self.y is not None else np.zeros(1))[None, None, :]
-        r2 = x**2 + y**2
+        y = self.y if self.y is not None else np.zeros(1)
+        h = self.harmonics_at(self.x[None, :, None], y[None, None, :], self.z[:, None, None])
+        return np.moveaxis(h, 0, 1)
+
+    def harmonics_at(self, x: Any, y: Any, z: Any) -> ComplexArray:
+        """Retarded harmonics (K, ...) at the points (x, y, z) (broadcast together; y unused in 2D)."""
+        x, y, z = (np.asarray(v, dtype=float) for v in (x, y, z))
+        r2 = x**2 + (y**2 if self.y is not None else 0.0)
         zr = self.rayleigh
         dz = z - self.focus
         w = self.width(z)
@@ -86,9 +90,10 @@ class GaussianBeam:
             gouy = np.arctan(dz / zr)
         inv_r = dz / (dz**2 + zr**2)  # 1 / R(z), 0 at the focus
         theta = self.k * r2 * inv_r / 2 - gouy
-        n = np.arange(1, self.n_harmonics + 1)[None, :, None, None]
-        a = np.asarray(self.amplitudes, dtype=float)[None, :, None, None]
-        return a * g[:, None] * np.exp(-1j * n * theta[:, None])
+        shape = (-1,) + (1,) * np.broadcast(x, y, z).ndim
+        n = np.arange(1, self.n_harmonics + 1).reshape(shape)
+        a = np.asarray(self.amplitudes, dtype=float).reshape(shape)
+        return a * g * np.exp(-1j * n * theta)
 
     # -- the analytic metrics -------------------------------------------------------------
 
@@ -352,3 +357,105 @@ def focus_dataset(beam: GaussianBeam, mode: str = "cw", *, time_sign: int = 1,
     else:
         raise ValueError(f"unknown mode {mode!r}: use 'cw', 'kzk' or 'transient'")
     return out
+
+
+# -- axisymmetric fields ----------------------------------------------------------------------
+
+
+def radial_beam(beam: GaussianBeam, r: RealArray | None = None) -> GaussianBeam:
+    """The same (3D, axisymmetric) beam on the half line r = x >= 0, y = 0."""
+    if beam.y is None:
+        raise ValueError("an axisymmetric field needs a 3D beam")
+    rv = np.asarray(beam.x[beam.x >= -1e-15] if r is None else r, dtype=float)
+    return replace(beam, x=np.abs(rv), y=np.zeros(1))
+
+
+def axisymmetric_dataset(beam: GaussianBeam, *, absolute: bool = False) -> dict[str, Any]:
+    """Harmonics of ``beam`` on an (r, z) grid in the layout (r, z, k), retarded or absolute."""
+    rb = radial_beam(beam)
+    h = _absolute(rb) if absolute else rb.harmonics()
+    return {"harmonics": np.transpose(h[..., 0], (2, 0, 1)), "r": rb.x, "z": rb.z, "layout": "rzk",
+            "phase": "absolute" if absolute else "retarded", **beam.medium()}  # fmt: skip
+
+
+def axisymmetric_mesh(beam: GaussianBeam, *, spacing: float = 0.25e-3, seed: int = 5) -> dict[str, Any]:
+    """Absolute-phase harmonics at the nodes of an unstructured triangular (r, z) mesh.
+
+    The nodes are a jittered grid (fixed on the axis and the edges) and the cells their
+    Delaunay triangles, as a finite-element solver would give them (``points`` (n, 2) as
+    (r, z), ``cells`` (m, 3), ``values`` (n, K)).
+    """
+    from scipy.spatial import Delaunay
+
+    r_max = float(beam.x[-1])
+    r = spacing * np.arange(round(r_max / spacing) + 1)
+    z = beam.z[0] + spacing * np.arange(round((beam.z[-1] - beam.z[0]) / spacing) + 1)
+    R, Z = np.meshgrid(r, z, indexing="ij")
+    rng = np.random.default_rng(seed)
+    jr = np.where((R > 0) & (R < r[-1]), rng.uniform(-0.3, 0.3, R.shape) * spacing, 0.0)
+    jz = np.where((Z > z[0]) & (Z < z[-1]), rng.uniform(-0.3, 0.3, Z.shape) * spacing, 0.0)
+    pts = np.stack([(R + jr).ravel(), (Z + jz).ravel()], axis=1)
+    h = beam.harmonics_at(pts[:, 0], 0.0, pts[:, 1])
+    n = np.arange(1, beam.n_harmonics + 1)[:, None]
+    h = h * np.exp(-1j * n * beam.k * (pts[:, 1] - beam.z[0]))
+    return {"points": pts, "cells": Delaunay(pts).simplices, "values": h.T, **beam.medium()}
+
+
+# -- unstructured meshes ------------------------------------------------------------------------
+
+
+def jittered_nodes(axes: list[RealArray], *, jitter: float = 0.3, seed: int = 5) -> RealArray:
+    """The nodes of the grid ``axes`` (d vectors), moved at random by up to ``jitter`` of a
+    spacing, except on the faces of the box."""
+    grids = np.meshgrid(*axes, indexing="ij")
+    rng = np.random.default_rng(seed)
+    cols = []
+    for g, a in zip(grids, axes, strict=True):
+        h = float(a[1] - a[0])
+        inner = (g > a[0]) & (g < a[-1])
+        cols.append((g + np.where(inner, rng.uniform(-jitter, jitter, g.shape) * h, 0.0)).ravel())
+    return np.stack(cols, axis=1)
+
+
+def unstructured_mesh(beam: GaussianBeam, *, spacing: float = 0.5e-3, absolute: bool = True,
+                      time_sign: int = 1, seed: int = 5) -> dict[str, Any]:  # fmt: skip
+    """Harmonics of ``beam`` at the nodes of an unstructured mesh over its box (x, y, z).
+
+    Tetrahedra in 3D, triangles in 2D (a beam without y; the nodes are then (x, z)), the
+    Delaunay cells of a jittered grid of nodes ``spacing`` apart. ``points`` (n, d), ``cells``,
+    ``values`` (n, K) in absolute phase (exp(-i n k (z - z0)), conjugated for ``time_sign`` -1)
+    or retarded.
+    """
+    from scipy.spatial import Delaunay
+
+    def axis(v: RealArray) -> RealArray:
+        return v[0] + spacing * np.arange(round((v[-1] - v[0]) / spacing) + 1)
+
+    axes = [axis(beam.x)] + ([] if beam.y is None else [axis(beam.y)]) + [axis(beam.z)]
+    pts = jittered_nodes(axes, seed=seed)
+    zc = pts[:, -1]
+    h = beam.harmonics_at(pts[:, 0], 0.0 if beam.y is None else pts[:, 1], zc)
+    if absolute:
+        n = np.arange(1, beam.n_harmonics + 1)[:, None]
+        h = h * np.exp(-1j * n * beam.k * (zc - beam.z[0]))
+    if time_sign == -1:
+        h = h.conj()
+    return {"points": pts, "cells": Delaunay(pts).simplices, "values": h.T, **beam.medium()}
+
+
+def mesh_time_series(
+    points: RealArray, values: ComplexArray, beam: GaussianBeam, dt: float, nt: int, *, seed: int = 3
+) -> RealArray:
+    """Real time series (n, nt) at mesh nodes from their absolute-phase harmonics ``values`` (n, K).
+
+    As a time-domain solver records them: p = Re sum P_n exp(+i n omega t) once the wave has
+    arrived (two periods after the travel time from the first plane, along the last coordinate),
+    noise before.
+    """
+    t = dt * np.arange(nt)
+    n = np.arange(1, values.shape[1] + 1)
+    w = 2 * math.pi * beam.frequency
+    p = np.einsum("pk,kt->pt", values, np.exp(1j * w * n[:, None] * t[None])).real
+    arrival = (points[:, -1] - beam.z[0]) / beam.sound_speed + 2 / beam.frequency
+    noise = np.random.default_rng(seed).standard_normal(p.shape) * max(beam.amplitudes)
+    return np.where(t[None] >= arrival[:, None], p, noise)
