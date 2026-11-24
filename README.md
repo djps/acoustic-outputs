@@ -1,10 +1,31 @@
-# acoustic-outputs
+# Acoustic Outputs from Simulations
 
-Acoustic field parameters from the output of any acoustic solver: beam metrics, and the parameters of IEC 62127-1, 61828, TS 62556, 62359 and 61689. They are computed from the harmonics of a steady periodic field on planes across the beam. Frequency-domain output gives those harmonics directly. Time-domain output gives the pressure in time, and its harmonics are fitted over a steady window. Both are supported, on regular grids, on axisymmetric (r, z) grids and meshes, and on unstructured 3D meshes. The outputs of BabelBrain, mSOUND and FOCUS are read as those programs write them:
+[![output](https://github.com/djps/acoustic-outputs/actions/workflows/pytest.yml/badge.svg)](https://github.com/djps/acoustic-outputs/actions/workflows/pytest.yml)
+
+This repository tries to derive acoustic field parameters from the output of any acoustic solver: beam metrics, and the parameters defined in standards IEC 62127-1, 61828, TS 62556, 62359 and 61689. 
+
+They are computed from the harmonics of a steady periodic field on planes across the beam. 
+
+Frequency-domain output gives those harmonics directly. 
+
+Time-domain output gives the pressure in time, and its harmonics are fitted over a steady window. 
+
+Both are supported, on regular grids, on axisymmetric (r, z) grids and meshes, and on unstructured 3D meshes. 
+
+The outputs of 
+* [BabelBrain](https://github.com/ProteusMRIgHIFU/BabelViscoFDTD),
+* [mSOUND](https://github.com/m-SOUND/mSOUND),
+* [fullwave](https://github.com/pinton-lab/fullwave25)
+* [FOCUS](https://www.egr.msu.edu/~fultras-web/)
+* [k-wave-python](https://github.com/waltsims/k-wave-python)
+* [optimus](https://github.com/optimuslib/optimus)
+* [FEniCSx](https://docs.fenicsproject.org/)
+
+are read as those programs write them. The output data is then preprocessed into a format that can be easily processed. 
 
 | Domain | Kind of solver | Examples | What is done to its output |
 | --- | --- | --- | --- |
-| frequency | pseudo-spectral marching, angular spectrum, KZK | pyWave3D, Wave3D, k-Wave `angularSpectrumCW` | harmonics on planes are taken as they are, in any axis order and phase convention |
+| frequency | pseudo-spectral marching, angular spectrum, KZK | pyWave3D, k-Wave `angularSpectrumCW` | harmonics on planes are taken as they are, in any axis order and phase convention |
 | frequency | mixed-domain marching | mSOUND `Forward*_fund`, `Forward*_sec` | the fundamental and second harmonic on every plane |
 | frequency | Rayleigh / fast nearest method, KZK | FOCUS `fnm_cw`, `cw_pressure`, `kzk_cw` | the CW pressure or KZK harmonics on the coordinate grid, phase convention read from the field |
 | frequency | transcranial planning (steady FDTD by BabelViscoFDTD) | BabelBrain | its `DataForSim.h5` is read as it is: the complex fundamental on the grid, with the medium of the target |
@@ -17,7 +38,7 @@ Acoustic field parameters from the output of any acoustic solver: beam metrics, 
 | time | axisymmetric finite element (wave, Westervelt) | FEniCSx / DOLFINx models in (r, z); any (r, z) grid | time series on an (r, z) grid, at mesh nodes or in an `.xdmf` file, fitted, then revolved |
 | time | finite element on unstructured meshes (wave, Westervelt) | FEniCSx / DOLFINx in 3D or planar 2D, e.g. FEniCSx-FUS | time series at the nodes fitted there, then resampled on planes |
 
-This code started as the recording code of [pyWave3D](https://github.com/djps/Wave3D). The metrics and file formats are the same, and so are the keys of `metrics.json`.
+The metrics and file formats are the same, and so are the keys of `metrics.json`.
 
 ## Installation
 
@@ -30,7 +51,7 @@ pip install -e ".[hdf5,kwave]"  # optional: HDF5 files (h5py, hdf5plugin for blo
 
 ## Quick start
 
-From the shell, with a dataset file (`.npz`, `.mat` or HDF5):
+From the shell, with a dataset file (`.npz`, `.mat` or `.h5`):
 
 ```bash
 acoustic-outputs --example kwave kwave.npz      # write a synthetic k-Wave-style dataset to try
@@ -205,8 +226,3 @@ pytest          # about 40 s; tests/test_kwave.py runs k-wave-python if it is in
 
 Set `ACOUSTIC_OUTPUTS_NO_BEARTYPE=1` to turn off run-time type checking.
 
-## Differences from pyWave3D's results
-
-- **Peak pressures:** they are refined by Newton steps between samples (`waveform.peak_pressures`). pyWave3D takes the largest of 4 samples per period per harmonic, which can miss a peak by up to 1 − cos(π/4K) of the fundamental: 2% for 4 harmonics, 0.1% for 16.
-- **Side lobes:** secondary maxima below −120 dB are ignored as round-off.
-- **Everything else** is computed the same way.
