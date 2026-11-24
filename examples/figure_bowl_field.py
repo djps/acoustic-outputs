@@ -297,7 +297,15 @@ def figure(bowl, field, inset, feat, text_color):
             lateral.annotate(f"first side lobe\n{lv:.1f} dB".replace("-", MINUS), (xs * 1e3, lv), xytext=(dx, -2),
                              textcoords="offset points", ha=ha, va="center", fontsize=7, color="#7b3294")  # fmt: skip
     lateral.plot([], [], marker="o", mfc="none", color="#7b3294", ms=4, mew=0.9, ls="none", label="side lobes")
-    lateral.legend(loc="upper right", fontsize=7, frameon=False)
+    # two legends: the curves and the side lobes on the left, the widths on the right
+    handles, labels = lateral.get_legend_handles_labels()
+    curves = [k for k, lab in enumerate(labels) if lab.startswith("Rayleigh") or lab == "side lobes"]
+    widths = [k for k in range(len(labels)) if k not in curves]
+    left = lateral.legend([handles[k] for k in curves], [labels[k] for k in curves], loc="upper left", fontsize=7,
+                          frameon=False)  # fmt: skip
+    lateral.add_artist(left)
+    lateral.legend([handles[k] for k in widths], [labels[k] for k in widths], loc="upper right", fontsize=7,
+                   frameon=False)  # fmt: skip
     span = max(6 * half.max(), 8 * bowl.wavelength) * 1e3
     lateral.set_xlim(-span, span)
     lateral.set_ylim(-40, 3)
