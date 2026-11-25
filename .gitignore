@@ -221,3 +221,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# simulation and benchmark results (examples write here; regenerate rather than commit)
+outputs/
