@@ -20,10 +20,11 @@ points are shown in the time frame of their plane.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import math
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 
@@ -51,6 +52,12 @@ class RecordSettings:
         derating: derating coefficient [dB / (cm MHz)].
         face_distance: distance from the first plane of the plane kept for IEC 61689 [m].
         workers: threads for the FFTs.
+        margin: points at each edge of the planes (in x, and in y unless ny = 1) that are not
+            part of the field, such as a solver's absorbing layer: they are left out of
+            everything recorded, and the results' grid is the interior.
+        plane_precision: precision of the whole planes kept (source, face, focal, spatial-peak
+            and final): ``"single"`` halves their memory and size on disk. Everything computed
+            while recording uses the planes as given, at their own precision.
     """
 
     focal_quantity: FocalQuantity = "p_positive"
@@ -62,6 +69,8 @@ class RecordSettings:
     derating: float = iec.DERATING_DB_PER_CM_MHZ
     face_distance: float = 0.003
     workers: int = 1
+    margin: int = 0
+    plane_precision: Literal["double", "single"] = "double"
 
 
 class PlaneRecorder:
@@ -90,12 +99,22 @@ class PlaneRecorder:
         settings: RecordSettings | None = None,
         axis_index: tuple[int, int] | None = None,
     ) -> None:
+        self.settings = settings if settings is not None else RecordSettings()
+        m = self.settings.margin
+        if m < 0 or 2 * m >= grid.nx - 1 or (grid.ny > 1 and 2 * m >= grid.ny):
+            raise ValueError(f"margin of {m} points does not fit the {grid.nx} x {grid.ny} plane")
+        self.plane_shape = (grid.nx, grid.ny)
+        self._crop = (slice(m, grid.nx - m), slice(m, grid.ny - m) if grid.ny > 1 else slice(None))
+        if m:
+            ny = grid.ny - 2 * m if grid.ny > 1 else grid.ny
+            y0 = grid.y0 + m * grid.dy if grid.ny > 1 else grid.y0
+            grid = dataclasses.replace(grid, nx=grid.nx - 2 * m, ny=ny, x0=grid.x0 + m * grid.dx, y0=y0)
         self.grid = grid
+        self._dtype = np.complex64 if self.settings.plane_precision == "single" else np.complex128
         self.k = n_harmonics
         self.frequency = frequency
         self.sound_speed = sound_speed
         self.impedance = impedance
-        self.settings = settings if settings is not None else RecordSettings()
         self.axis_index = axis_index if axis_index is not None else grid.centre_index
         ix, iy = self.axis_index
         if not (0 <= ix < grid.nx and 0 <= iy < grid.ny):
@@ -150,7 +169,8 @@ class PlaneRecorder:
         return max(self._rows["ax_pp"], default=math.nan)
 
     def add(self, z: float, harmonics: ComplexArray, n_active: int | None = None) -> None:
-        """Record the plane at ``z`` holding ``harmonics`` (K, nx, ny).
+        """Record the plane at ``z`` holding ``harmonics`` (K, nx, ny), on the whole plane (the
+        ``margin`` of the settings is removed here).
 
         Planes must come in increasing z. The recorder keeps a reference to the last plane (it
         becomes ``Results.final``), so a caller reusing one buffer must not change it after the
@@ -162,11 +182,11 @@ class PlaneRecorder:
             n_active: only the first ``n_active`` harmonics are non-zero (default: all K).
         """
         g, s, rows = self.grid, self.settings, self._rows
-        if harmonics.shape != (self.k, g.nx, g.ny):
-            raise ValueError(f"plane of shape {harmonics.shape}, expected {(self.k, g.nx, g.ny)}")
+        if harmonics.shape != (self.k, *self.plane_shape):
+            raise ValueError(f"plane of shape {harmonics.shape}, expected {(self.k, *self.plane_shape)}")
         if rows["z"] and z <= rows["z"][-1]:
             raise ValueError(f"planes must come in increasing z ({z} after {rows['z'][-1]})")
-        f = harmonics
+        f = harmonics[:, self._crop[0], self._crop[1]]  # a view of the interior
         na = self.k if n_active is None else n_active
         r = self.n_planes
         ix, iy = self.axis_index
@@ -197,7 +217,7 @@ class PlaneRecorder:
         rows["cen_y"].append(cy)
 
         if self._source is None:
-            self._source = f.astype(complex)
+            self._source = f.astype(self._dtype)
         d_face = abs(z - (rows["z"][0] + s.face_distance))
         if d_face < self._face["distance"]:
             self._face.update(distance=d_face, index=r)
@@ -242,11 +262,10 @@ class PlaneRecorder:
                 p.update(distance=d, z=float(z), value=f[:, i, j].astype(complex))
         self._last = f
 
-    @staticmethod
-    def _keep(buffer: ComplexArray | None, f: ComplexArray) -> ComplexArray:
-        """Copy ``f`` into ``buffer`` (allocated on first use)."""
+    def _keep(self, buffer: ComplexArray | None, f: ComplexArray) -> ComplexArray:
+        """Copy ``f`` into ``buffer`` (allocated on first use, at the planes' precision)."""
         if buffer is None:
-            return f.copy()
+            return f.astype(self._dtype)
         buffer[...] = f
         return buffer
 
@@ -288,19 +307,19 @@ class PlaneRecorder:
             power=arr["power"],
             plane_intensity=arr["pl_i"],
             max_p_plus=self._max_pp,
-            final=self._last.astype(complex),
+            final=self._last.astype(self._dtype),  # a copy: the caller may reuse its buffer
             points=points,
             focal_index=int(self._focus["index"]),
-            focal_plane=self._focus["field"].astype(complex),
+            focal_plane=self._focus["field"],
             peak_index=int(self._peak["index"]) if peak else -1,
             peak_xy_index=self._peak["ij"] if peak else self.axis_index,
-            peak_plane=self._peak["field"].astype(complex) if peak else None,
+            peak_plane=self._peak["field"] if peak else None,
             focal_quantity=s.focal_quantity,
             centroid_x=arr["cen_x"],
             centroid_y=arr["cen_y"],
             source_plane=self._source,
             face_index=int(self._face["index"]),
-            face_plane=self._face["field"].astype(complex),
+            face_plane=self._face["field"],
             sound_speed=self.sound_speed,
             levels_db=list(s.levels_db),
             metrics_harmonics=s.metrics_harmonics,

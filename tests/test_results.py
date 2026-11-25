@@ -187,3 +187,32 @@ def test_save_and_load_round_trip(tmp_path: Path, beam: GaussianBeam) -> None:
     assert_metrics_equal(res.metrics(), back.metrics(), 1e-12)
     with pytest.raises(FileNotFoundError, match="older version"):
         ao.Results.load(tmp_path)
+
+
+def test_margin_and_single_precision_planes(beam: GaussianBeam, res: ao.Results, tmp_path: Path) -> None:
+    """A margin (an absorbing layer) is left out of everything recorded, and the planes kept can
+    be single precision; what is computed while recording is unchanged."""
+    m = 4
+    settings = ao.RecordSettings(margin=m, plane_precision="single")
+    cut = ao.from_harmonics(beam.harmonics(), x=beam.x, y=beam.y, z=beam.z, settings=settings, **beam.medium())
+    assert (cut.grid.nx, cut.grid.ny) == (res.grid.nx - 2 * m, res.grid.ny - 2 * m)
+    np.testing.assert_allclose(cut.grid.x, res.grid.x[m:-m], atol=1e-15)
+    np.testing.assert_allclose(cut.grid.y, res.grid.y[m:-m], atol=1e-15)
+    assert cut.axis_xy == pytest.approx(res.axis_xy, abs=1e-15)
+    inner = (slice(None), slice(m, -m), slice(m, -m))
+    for name in ("focal_plane", "peak_plane", "source_plane", "face_plane", "final"):
+        plane = getattr(cut, name)
+        assert plane.dtype == np.complex64, name
+        np.testing.assert_allclose(plane, getattr(res, name)[inner], rtol=1e-6, atol=1e-6 * np.abs(plane).max())
+    assert cut.axis.dtype == np.complex128  # the axis is not a whole plane: it stays double
+    np.testing.assert_array_equal(cut.xz_p_plus, res.xz_p_plus[:, m:-m])
+    np.testing.assert_array_equal(cut.axis_p_plus, res.axis_p_plus)
+    assert np.all(cut.power <= res.power * (1 + 1e-12))  # the power through the interior only
+    full, part = res.metrics(level_db=-6), cut.metrics(level_db=-6)
+    assert part["focus"]["p_positive"] == full["focus"]["p_positive"]
+    assert part["focal_width_x_6dB"] == pytest.approx(full["focal_width_x_6dB"], rel=1e-12)
+    cut.save(tmp_path)
+    assert ao.Results.load(tmp_path).focal_plane.dtype == np.complex64
+    with pytest.raises(ValueError, match="margin"):
+        ao.PlaneRecorder(res.grid, 1, frequency=1e6, sound_speed=1500.0, impedance=1.5e6,
+                         settings=ao.RecordSettings(margin=res.grid.nx // 2))  # fmt: skip
