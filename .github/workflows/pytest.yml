@@ -35,7 +35,9 @@ jobs:
 
     - name: Run tests with coverage
       run: pytest --cov=acoustic_outputs --cov-report=lcov
-      - uses: coverallsapp/github-action@v2
-        if: matrix.python == '3.12'   # upload once, not once per matrix entry
-        with:
-          file: coverage.lcov
+
+    - name: Upload coverage to Coveralls
+      uses: coverallsapp/github-action@v2
+      if: matrix.python-version == '3.12'   # upload once, not once per matrix entry
+      with:
+        file: coverage.lcov
