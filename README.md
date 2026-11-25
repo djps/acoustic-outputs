@@ -1,19 +1,21 @@
 # Acoustic Outputs from Simulations
 
-<<<<<<< README.md
 [![output](https://github.com/djps/acoustic-outputs/actions/workflows/pytest.yml/badge.svg)](https://github.com/djps/acoustic-outputs/actions/workflows/pytest.yml)
+<!-- [![Coverage Status](https://coveralls.io/repos/github/djps/pyWave3D/badge.svg?branch=main)](https://coveralls.io/github/djps/pyWave3D?branch=main) -->
+[![made-with-python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-yellow.svg)](./LICENSE.md)
 
-This repository tries to derive acoustic field parameters from the output of any acoustic solver: beam metrics, and the parameters defined in standards IEC 62127-1, 61828, TS 62556, 62359 and 61689. 
+This repository tries to derive acoustic field parameters from the output of any acoustic solver: beam metrics, and the parameters defined in standards IEC 62127-1, 61828, TS 62556, 62359 and 61689.
 
-They are computed from the harmonics of a steady periodic field on planes across the beam. 
+They are computed from the harmonics of a steady periodic field on planes across the beam.
 
-Frequency-domain output gives those harmonics directly. 
+Frequency-domain output gives those harmonics directly.
 
-Time-domain output gives the pressure in time, and its harmonics are fitted over a steady window. 
+Time-domain output gives the pressure in time, and its harmonics are fitted over a steady window.
 
-Both are supported, on regular grids, on axisymmetric (r, z) grids and meshes, and on unstructured 3D meshes. 
+Both are supported, on regular grids, on axisymmetric (r, z) grids and meshes, and on unstructured 3D meshes.
 
-The outputs of 
+The outputs of
 * [BabelBrain](https://github.com/ProteusMRIgHIFU/BabelViscoFDTD),
 * [mSOUND](https://github.com/m-SOUND/mSOUND),
 * [fullwave](https://github.com/pinton-lab/fullwave25)
@@ -22,10 +24,8 @@ The outputs of
 * [optimus](https://github.com/optimuslib/optimus)
 * [FEniCSx](https://docs.fenicsproject.org/)
 
-are read as those programs write them. The output data is then preprocessed into a format that can be easily processed. 
-=======
-Acoustic field parameters from the output of any acoustic solver: beam metrics, and the parameters of IEC 62127-1, 61828, TS 62556, 62359 and 61689. They are computed from the harmonics of a steady periodic field on planes across the beam. Frequency-domain output gives those harmonics directly. Time-domain output gives the pressure in time, and its harmonics are fitted over a steady window. Both are supported, on regular grids, on axisymmetric (r, z) grids and meshes, and on unstructured 3D meshes. The outputs of BabelBrain, mSOUND, FOCUS and OptimUS are read as those programs write them:
->>>>>>> /tmp/stash.md
+are read as those programs write them. The output data is then preprocessed into a format that can be easily processed.
+
 
 | Domain | Kind of solver | Examples | What is done to its output |
 | --- | --- | --- | --- |
@@ -263,4 +263,3 @@ pytest          # about 40 s; tests/test_kwave.py runs k-wave-python if it is in
 - **Real k-Wave run:** a k-wave-python CW run is compared with an angular-spectrum projection of its own first plane. They agree to within 6% of the peak.
 
 Set `ACOUSTIC_OUTPUTS_NO_BEARTYPE=1` to turn off run-time type checking.
-

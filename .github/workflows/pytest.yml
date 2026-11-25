@@ -1,6 +1,14 @@
 name: output
 
-on: [push, pull_request]
+on:
+  push:
+    paths-ignore:
+      - "README.md"
+      - "TODO.md"
+  pull_request:
+    paths-ignore:
+      - "README.md"
+      - "TODO.md"
 
 jobs:
   build:
