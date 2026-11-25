@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=77"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "acoustic-outputs"
@@ -14,6 +14,7 @@ authors = [{ name = "David Sinden" }]
 keywords = ["acoustics", "ultrasound", "HIFU", "IEC 62127", "k-Wave", "FDTD", "field parameters"]
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering :: Physics",
     "Intended Audience :: Science/Research",
 ]
@@ -35,11 +36,25 @@ dev = ["pytest>=7", "h5py>=3.8", "hdf5plugin>=4", "ruff>=0.4", "mypy>=1.8"]
 [project.scripts]
 acoustic-outputs = "acoustic_outputs.cli:main"
 
-[tool.setuptools.dynamic]
-version = { attr = "acoustic_outputs.__version__" }
+[tool.hatch.version]
+path = "src/acoustic_outputs/__init__.py"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.hatch.metadata]
+
+# can be removed as soon as uff is published and no longer a direct reference
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/acoustic_outputs"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/.github",
+    "/docs",
+    "/examples",
+    "/tests",
+    "/outputs",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
