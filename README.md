@@ -1,7 +1,7 @@
 # Acoustic Outputs from Simulations
 
 [![output](https://github.com/djps/acoustic-outputs/actions/workflows/pytest.yml/badge.svg)](https://github.com/djps/acoustic-outputs/actions/workflows/pytest.yml)
-<!-- [![Coverage Status](https://coveralls.io/repos/github/djps/pyWave3D/badge.svg?branch=main)](https://coveralls.io/github/djps/pyWave3D?branch=main) -->
+[![Coverage Status](https://coveralls.io/repos/github/djps/acoustic-outputs/badge.svg?branch=main)](https://coveralls.io/github/djps/acoustic-outputs?branch=main)
 [![made-with-python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-yellow.svg)](./LICENSE.md)
 
