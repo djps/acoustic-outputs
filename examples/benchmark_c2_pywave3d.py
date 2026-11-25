@@ -7,7 +7,7 @@ pressure p0 = rho c v0. The default level is the quasi-linear one of Figure C.2,
 
 The model is pyWave3D (one-way Westervelt equation, spatial marching of the harmonics in retarded
 time, exact angular-spectrum diffraction and thermoviscous absorption, spectral / shock-capturing
-nonlinear step; ``~/Wave3D/pyWave3D``). The source is the bowl's own field on a plane a few
+nonlinear step; ``pip install pywave3d``). The source is the bowl's own field on a plane a few
 wavelengths beyond its aperture plane, from the Rayleigh integral over the bowl
 (:class:`acoustic_outputs.benchmarks.FocusedBowl`): nonlinear distortion between the bowl and that
 plane is negligible at these levels. This is how the Westervelt results of C.2 set the boundary
@@ -31,8 +31,9 @@ shock-capturing scheme took over, the number of steps of each kind and their sub
 (width, strength, profile, reflection), the source plane (position, Rayleigh quadrature, radial
 step), the precision, threads and timings::
 
-    PYTHONPATH=~/Wave3D/pyWave3D/src python examples/benchmark_c2_pywave3d.py --workers 16
-    PYTHONPATH=~/Wave3D/pyWave3D/src python examples/benchmark_c2_pywave3d.py --p0 0.45e6 --harmonics 64
+    pip install -e ".[examples]"    # pywave3d, k-wave-python, matplotlib
+    python examples/benchmark_c2_pywave3d.py --workers 16
+    python examples/benchmark_c2_pywave3d.py --p0 0.45e6 --harmonics 64
 """
 
 from __future__ import annotations
@@ -57,6 +58,14 @@ import numpy as np
 # and here it returns acoustic_outputs' (the recorder is swapped), so pyWave3D's checks are turned
 # off (its documented switch, read when pywave3d is imported)
 os.environ.setdefault("PYWAVE3D_NO_BEARTYPE", "1")
+
+try:
+    import pywave3d as pw
+    import pywave3d.solver as pw_solver
+    from pywave3d.linear import AbsorbingLayer
+    from pywave3d.model import Source
+except ImportError as err:
+    raise ImportError("this example needs pyWave3D: pip install 'acoustic-outputs[examples]'") from err
 
 import acoustic_outputs as ao
 from acoustic_outputs.benchmarks import FocusedBowl
@@ -101,8 +110,12 @@ def pml_margin(layer: Any, grid: Any) -> int:
 
 
 def git_version(path: Path) -> str | None:
-    """The short commit of the repository holding ``path``, marked if it has uncommitted changes."""
+    """The short commit of the repository holding ``path``, marked if it has uncommitted changes; None
+    if ``path`` is not tracked by one (e.g. a package installed from PyPI into a virtual environment
+    inside some other repository)."""
     try:
+        subprocess.run(["git", "-C", str(path), "ls-files", "--error-unmatch", "__init__.py"], capture_output=True,
+                       check=True)  # fmt: skip
         commit = subprocess.run(["git", "-C", str(path), "rev-parse", "--short", "HEAD"], capture_output=True,
                                 text=True, check=True).stdout.strip()  # fmt: skip
         dirty = subprocess.run(["git", "-C", str(path), "status", "--porcelain", "--untracked-files=no", "."],
@@ -114,7 +127,6 @@ def git_version(path: Path) -> str | None:
 
 def software() -> dict[str, Any]:
     """The versions of the codes that ran, for the report."""
-    import pywave3d as pw
     import scipy
 
     return {
@@ -130,9 +142,6 @@ def software() -> dict[str, Any]:
 def setup(bowl: FocusedBowl, *, ppw: float, harmonics: int, half_width: float, z_start: float, z_end: float,
           layer_width: float, nonlinear: bool, workers: int) -> tuple[Any, Any, Any, Any]:  # fmt: skip
     """pyWave3D's medium, grid, absorbing layer and settings of a run."""
-    import pywave3d as pw
-    from pywave3d.linear import AbsorbingLayer
-
     medium = pw.Medium(sound_speed=bowl.sound_speed, density=bowl.density, nonlinearity=BETA, diffusivity=DIFFUSIVITY)
     lx = 2 * half_width
     grid = pw.Grid.from_lengths(lx, lx, z_end - z_start, wavelength=bowl.wavelength,
@@ -223,9 +232,6 @@ def run(bowl: FocusedBowl, *, ppw: float, harmonics: int, half_width: float, z_s
         layer_width: float, nonlinear: bool, workers: int,
         plane_precision: str = "single") -> tuple[ao.Results, dict[str, Any]]:  # fmt: skip
     """March the bowl's field with pyWave3D, recorded by acoustic_outputs; the results and the numerics."""
-    import pywave3d as pw
-    import pywave3d.solver as pw_solver
-    from pywave3d.model import Source
 
     t_run = time.perf_counter()
     lam = bowl.wavelength

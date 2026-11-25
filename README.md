@@ -47,6 +47,7 @@ Requires Python 3.10 or later.
 ```bash
 pip install -e ".[test]"        # numpy, scipy, beartype (+ pytest, h5py)
 pip install -e ".[hdf5,kwave]"  # optional: HDF5 files (h5py, hdf5plugin for blosc), k-wave-python
+pip install -e ".[examples]"    # the examples: k-wave-python, pywave3d, matplotlib
 ```
 
 ## Quick start

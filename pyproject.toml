@@ -27,6 +27,8 @@ dependencies = [
 hdf5 = ["h5py>=3.8", "hdf5plugin>=4"]
 kwave = ["k-wave-python>=0.6"]
 plot = ["matplotlib>=3.7"]
+# the solvers the examples run (examples/), and matplotlib for their figures
+examples = ["k-wave-python>=0.6", "pywave3d>=0.2", "matplotlib>=3.7"]
 test = ["pytest>=7", "pytest-cov", "h5py>=3.8", "hdf5plugin>=4"]
 dev = ["pytest>=7", "h5py>=3.8", "hdf5plugin>=4", "ruff>=0.4", "mypy>=1.8"]
 
