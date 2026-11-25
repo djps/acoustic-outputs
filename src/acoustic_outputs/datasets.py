@@ -45,6 +45,12 @@ kind               keys (optional ones in brackets)
                    ``spacing``]; or an ``.xdmf`` file written by DOLFINx [``field``, a name or a
                    list of them]. All take [``phase`` = "auto", ``time_sign``, ``coordinates`` =
                    "rz", ``dx``, ``r_max``]. A 2D ``.xdmf`` file is taken as axisymmetric.
+``optimus``        OptimUS's ``export_to_file(..., file_format="mat")``: ``points`` (3, N) and
+                   ``total_field`` (or ``incident_field``, ``scattered_field``: ``field`` =
+                   "total"), the frequency and the medium (not in the file); [``propagation`` =
+                   "x" (or ``source_axis``), ``axis_point`` (or ``location``), ``z_min``,
+                   ``geometry`` = "auto", ``dx``, ``r_max``]; see
+                   :mod:`acoustic_outputs.preprocess.optimus`. Recognised without ``kind``.
 ``unstructured``   a field on a 3D (or planar 2D) mesh, resampled on planes (see
                    :mod:`acoustic_outputs.preprocess.unstructured_frequency_domain` and
                    ``unstructured_time_domain``): ``points`` (n, 3) and
@@ -83,6 +89,7 @@ from acoustic_outputs.preprocess import (
     focus,
     frequency_domain,
     msound,
+    optimus,
     time_domain,
     unstructured_frequency_domain,
     unstructured_time_domain,
@@ -104,6 +111,7 @@ KINDS = (
     "focus",
     "axisymmetric",
     "unstructured",
+    "optimus",
 )
 
 #: names under which a key may also be found (the first is the one used)
@@ -605,6 +613,34 @@ def _unstructured(keys: _Keys, common: dict[str, Any]) -> Results:
     return unstructured_frequency_domain.from_unstructured_harmonics(points, values, **cells, **angle, **grid)
 
 
+def _optimus(keys: _Keys, common: dict[str, Any]) -> Results:
+    which = str(keys.get("field", "total")).removesuffix("_field")
+    common = {k: v for k, v in common.items() if k != "axis_xy"}  # the beam axis is the source's
+    if not keys.has("focusing_depth"):
+        common["focusing_depth"] = None
+    prop = keys.get("propagation")
+    if prop is None:
+        prop = keys.raw("source_axis")
+    point = keys.raw("axis_point")
+    if point is None:
+        point = keys.raw("location")
+    z_min = keys.num("z_min")
+    return optimus.from_optimus(
+        points=np.asarray(keys.raw("points", required=True), dtype=float),
+        field=np.asarray(keys.raw(f"{which}_field", required=True)),
+        propagation=prop if isinstance(prop, str) or prop is None else np.asarray(prop, dtype=float),
+        axis_point=None if point is None else np.asarray(point, dtype=float),
+        z_min=z_min,
+        geometry=str(keys.get("geometry", "auto")),  # type: ignore[arg-type]
+        phase=str(keys.get("phase", "absolute")),  # type: ignore[arg-type]
+        time_sign=int(keys.get("time_sign", -1)),
+        dx=keys.num("dx"),
+        r_max=keys.num("r_max"),
+        **_medium(keys),
+        **common,
+    )
+
+
 def from_dataset(
     data: str | Path | Mapping[str, Any],
     kind: str | None = None,
@@ -634,6 +670,7 @@ def from_dataset(
         kind = (
             "babelbrain" if babelbrain.is_babelbrain(d)
             else "msound" if is_msound(d)
+            else "optimus" if optimus.is_optimus(d)
             else ("axisymmetric" if d["xdmf"].planar else "unstructured") if "xdmf" in d
             else None
         )  # fmt: skip
@@ -659,6 +696,8 @@ def from_dataset(
         res = _axisymmetric(keys, common)
     elif kind == "unstructured":
         res = _unstructured(keys, common)
+    elif kind == "optimus":
+        res = _optimus(keys, common)
     else:
         res = _fullwave(keys, common)
     extra = keys.unused()

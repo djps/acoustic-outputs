@@ -16,7 +16,8 @@ Frequency-domain output (complex harmonics):
   :func:`from_axisymmetric_xdmf_harmonics`;
 * on unstructured 3D (or planar 2D) meshes, resampled on planes:
   :func:`from_unstructured_harmonics`, :func:`from_unstructured_xdmf_harmonics`;
-* BabelBrain: :func:`from_babelbrain`; mSOUND: :func:`from_msound`; FOCUS CW and KZK: :func:`from_focus`.
+* BabelBrain: :func:`from_babelbrain`; mSOUND: :func:`from_msound`; FOCUS CW and KZK: :func:`from_focus`;
+  OptimUS (boundary elements): :func:`from_optimus`.
 
 Time-domain output (pressure time series, fitted for their harmonics over a steady window):
 
@@ -64,6 +65,7 @@ from acoustic_outputs.preprocess.fdtd import from_time_series as from_fdtd_time_
 from acoustic_outputs.preprocess.focus import from_focus
 from acoustic_outputs.preprocess.frequency_domain import from_harmonics
 from acoustic_outputs.preprocess.msound import from_msound, from_msound_time_series
+from acoustic_outputs.preprocess.optimus import from_optimus
 from acoustic_outputs.preprocess.time_domain import from_kwave, from_time_series
 from acoustic_outputs.preprocess.unstructured_frequency_domain import (
     from_unstructured_harmonics,
@@ -101,6 +103,7 @@ __all__ = [
     "from_kwave",
     "from_msound",
     "from_msound_time_series",
+    "from_optimus",
     "from_time_series",
     "from_unstructured_harmonics",
     "from_unstructured_time_series",

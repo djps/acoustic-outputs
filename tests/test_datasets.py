@@ -29,6 +29,7 @@ def datasets(coarse: GaussianBeam, flat: GaussianBeam) -> dict[str, dict]:
         "focus": synthetic.focus_dataset(coarse, "transient"),
         "axisymmetric": synthetic.axisymmetric_dataset(coarse),
         "unstructured": synthetic.unstructured_mesh(coarse, spacing=0.625e-3),
+        "optimus": {**synthetic.optimus_dataset(coarse), **coarse.medium()},
     }
 
 
@@ -47,6 +48,9 @@ def test_every_kind_from_npz(kind: str, data: dict, coarse_ref: ao.Results, tmp_
         assert res.impedance == pytest.approx(1041 * 1562) and res.metrics()["focus"]["z"] == pytest.approx(30e-3)
     elif kind == "msound":  # the fundamental and the second harmonic (see test_msound_focus.py)
         assert res.grid.n_harmonics == 2 and res.metrics()["focus"]["z"] == pytest.approx(30e-3)
+    elif kind == "optimus":  # the fundamental only (see test_optimus.py)
+        assert res.grid.n_harmonics == 1
+        assert res.metrics()["focus"]["p_positive"] == pytest.approx(GaussianBeam().amplitudes[0], rel=1e-9)
     elif kind == "unstructured":  # resampled from a mesh 0.625 mm apart (see test_unstructured.py)
         ref, got = coarse_ref.metrics(), res.metrics()
         assert got["focus"]["p_positive"] == pytest.approx(ref["focus"]["p_positive"], rel=3e-2)

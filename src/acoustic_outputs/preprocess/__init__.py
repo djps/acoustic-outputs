@@ -34,7 +34,10 @@ Particular solvers, in their own formats:
 * :mod:`~acoustic_outputs.preprocess.msound`: mSOUND, its frequency-specific fundamental and
   second harmonic (frequency domain) or its transient sensor series (time domain);
 * :mod:`~acoustic_outputs.preprocess.focus`: FOCUS, its CW and KZK pressures (frequency domain)
-  or its transient pressures (time domain).
+  or its transient pressures (time domain);
+* :mod:`~acoustic_outputs.preprocess.optimus`: OptimUS (boundary elements), its total, incident
+  or scattered field at one frequency (frequency domain), on planes across the beam or a plane
+  through it.
 
 The finite-element modules share :mod:`~acoustic_outputs.preprocess._mesh` (cells, point
 location, XDMF files, the DOLFINx probe). ``spectral`` is the former name of ``frequency_domain``.
@@ -52,6 +55,7 @@ from acoustic_outputs.preprocess import (
     focus,
     frequency_domain,
     msound,
+    optimus,
     spectral,
     time_domain,
     unstructured_frequency_domain,
@@ -70,6 +74,7 @@ __all__ = [
     "focus",
     "frequency_domain",
     "msound",
+    "optimus",
     "read_xdmf",
     "spectral",
     "time_domain",

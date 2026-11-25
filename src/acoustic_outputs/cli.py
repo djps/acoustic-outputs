@@ -3,6 +3,7 @@
     acoustic-outputs DATA [--kind KIND] [-o DIR] [--frequency F] [--sound-speed C] [--density RHO]
                      [--set KEY=VALUE ...] [--point NAME X Y Z ...] [-q | -v]
     acoustic-outputs --example KIND FILE      # write a synthetic dataset of KIND to try it
+    acoustic-outputs --benchmark bowl [-o DIR] [--set KEY=VALUE ...]   # IEC TS 63587 benchmark C.1
 
 ``DATA`` is a ``.npz``, ``.mat``, HDF5 or DOLFINx ``.xdmf`` file (see :mod:`acoustic_outputs.datasets`); the outputs
 (``metrics.json``, ``axial.txt``, ``planes.txt``, ``focal_plane.txt``, ``results.npz`` and the
@@ -50,6 +51,12 @@ def _example(kind: str, path: Path) -> Path:
         "msound": lambda: synthetic.msound_dataset(beam),
         "focus": lambda: synthetic.focus_dataset(synthetic.GaussianBeam(z=np.linspace(15e-3, 45e-3, 121))),
         "axisymmetric": lambda: synthetic.axisymmetric_dataset(beam),
+        "optimus": lambda: {
+            **synthetic.optimus_dataset(beam),
+            "f0": beam.frequency,
+            "c0": beam.sound_speed,
+            "rho0": beam.density,
+        },
         "unstructured": lambda: synthetic.unstructured_mesh(
             synthetic.GaussianBeam(
                 x=np.linspace(-5e-3, 5e-3, 21), y=np.linspace(-5e-3, 5e-3, 21), z=np.linspace(20e-3, 40e-3, 41)
@@ -79,6 +86,45 @@ def summary(metrics: dict[str, Any]) -> list[str]:
     ]
 
 
+def _benchmark(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    """Run benchmark C.1 and write its report."""
+    from dataclasses import fields
+
+    from acoustic_outputs.benchmarks import bowl as bench
+
+    sets: dict[str, Any] = {}
+    for item in args.set:
+        key, sep, value = item.partition("=")
+        if not sep:
+            parser.error(f"--set {item!r}: expected KEY=VALUE")
+        sets[key.strip()] = _parse_value(value)
+    names = {f.name for f in fields(bench.FocusedBowl)}
+    medium = {"frequency": args.frequency, "sound_speed": args.sound_speed, "density": args.density}
+    inputs = {k: float(v) for k, v in {**sets, **{k: v for k, v in medium.items() if v is not None}}.items()
+              if k in names}  # fmt: skip
+    options = {k: v for k, v in sets.items() if k not in names}
+    allowed = {"spacings", "r_max", "z_range", "method", "points_per_wavelength", "longitudinal"}
+    unknown = sorted(set(options) - allowed)
+    if unknown:
+        parser.error(f"unknown benchmark settings {unknown}: use the bowl's {sorted(names)} or {sorted(allowed)}")
+    if "spacings" in options:
+        options["spacings"] = tuple(float(v) for v in options["spacings"])
+    if "z_range" in options:
+        options["z_range"] = tuple(float(v) for v in options["z_range"])
+    bowl = bench.FocusedBowl(**inputs)
+    options.setdefault("spacings", (bowl.wavelength / 2, bowl.wavelength / 4))
+    try:
+        report = bench.run_bowl_benchmark(bowl, **options)
+    except ValueError as err:
+        print(f"acoustic-outputs: {err}", file=sys.stderr)
+        return 1
+    written = bench.save_report(report, args.output)
+    for line in bench.summary(report):
+        log.info(line)
+    log.info("wrote %d files to %s", len(written), args.output)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="acoustic-outputs",
@@ -96,6 +142,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="write the waveform at the point (x, y, z) [m] to NAME")  # fmt: skip
     parser.add_argument("--harmonics", type=int, default=4, help="harmonics written to the files")
     parser.add_argument("--example", metavar="KIND", choices=KINDS, help="write a synthetic dataset to DATA")
+    parser.add_argument("--benchmark", choices=["bowl"],
+                        help="run an IEC TS 63587 benchmark (bowl: C.1); --set changes its inputs "
+                        "(aperture, radius_of_curvature, p0, attenuation, spacings, method, ...)")  # fmt: skip
     parser.add_argument("-q", "--quiet", action="store_true")
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -104,6 +153,8 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.WARNING if args.quiet else logging.DEBUG if args.verbose else logging.INFO,
         format="%(levelname)s: %(message)s" if args.quiet else "%(message)s",
     )
+    if args.benchmark:
+        return _benchmark(args, parser)
     if args.data is None:
         parser.error("a dataset file is needed")
     if args.example:

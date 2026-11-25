@@ -459,3 +459,48 @@ def mesh_time_series(
     arrival = (points[:, -1] - beam.z[0]) / beam.sound_speed + 2 / beam.frequency
     noise = np.random.default_rng(seed).standard_normal(p.shape) * max(beam.amplitudes)
     return np.where(t[None] >= arrival[:, None], p, noise)
+
+
+# -- OptimUS ------------------------------------------------------------------------------------
+
+
+def optimus_dataset(
+    beam: GaussianBeam,
+    mode: str = "volume",
+    *,
+    propagation: str = "x",
+    location: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    scattered: float = 0.0,
+) -> dict[str, Any]:
+    """The fundamental of ``beam`` as OptimUS's ``export_to_file(..., file_format="mat")`` saves it.
+
+    The beam travels along ``propagation`` (``"x"``, OptimUS's default, or ``"-z"``, ...) from
+    ``location``, its z the distance along the beam; the field is in absolute phase with
+    exp(-i omega t) (BEMPP's convention). ``mode``: ``"volume"`` (the planes z = beam.z across
+    the beam, on the beam's (x, y) grid, as ``VisualisePlane`` objects at each offset) or
+    ``"plane"`` (one plane through the axis, the beam's x across, as one ``VisualisePlane``).
+    ``scattered`` adds that fraction of the field as a "scattered" part. The points are in
+    ``numpy.mgrid`` order of each plane, as OptimUS makes them.
+    """
+    name = propagation.lstrip("+-")
+    axis, sign = "xyz".index(name), (-1 if propagation.startswith("-") else 1)
+    transverse = [i for i in range(3) if i != axis]
+    t2 = beam.y if (mode == "volume" and beam.y is not None) else np.zeros(1)
+    if mode not in ("volume", "plane"):
+        raise ValueError(f"unknown mode {mode!r}: use 'volume' or 'plane'")
+    zb, a1, a2 = np.meshgrid(beam.z, beam.x, t2, indexing="ij")
+    zb, a1, a2 = zb.ravel(), a1.ravel(), a2.ravel()
+    pts = np.zeros((3, zb.size))
+    pts[axis] = location[axis] + sign * zb
+    pts[transverse[0]] = location[transverse[0]] + a1
+    pts[transverse[1]] = location[transverse[1]] + a2
+    p = beam.harmonics_at(a1, a2, zb)[0] * np.exp(-1j * beam.k * zb)  # absolute, exp(+i omega t)
+    total = p.conj()  # exp(-i omega t)
+    return {
+        "points": pts,
+        "total_field": total,
+        "incident_field": total * (1 - scattered),
+        "scattered_field": total * scattered,
+        "L2_norm_ptot_MPa": float(np.linalg.norm(total)),
+        "gmres_iter_count": 12,
+    }
