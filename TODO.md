@@ -76,6 +76,12 @@ The TS allows time-domain source conditions with the whole pulse recorded. Its s
   - equivalent flat source for KZK: aperture 114 mm, focused at 98 mm, pressure × 0.917.
 
   The reference table (p+, p−, A_s, focal sizes) is still empty in ACD#2. Add the case as a dataset or example (e.g. from pyWave3D / HIFU beam / k-Wave) once it is published.
+
+  `examples/benchmark_c2_pywave3d.py` runs it with pyWave3D. At p0 = 0.45 MPa with 64 harmonics (run of 2026-11-25), the focal waveform does not match Figure C.2. It has a spike at the shock, p+ = 102 MPa (226 p0) against ≈ 205 p0, ripples along the tail and dips before the front. That is Gibbs ringing from truncating the harmonic series at a shock: |P_64| / |P_1| = 1.3 %, close to a sawtooth's 1/64. With a Lanczos σ-filter on the same 64 harmonics, p+ = 91.4 MPa (203 p0), and p− is unchanged at −39 p0, both as in Figure C.2.
+  - [ ] **σ-filtered waveform reconstruction:** add an optional spectral filter (Lanczos σ, perhaps σ²) to `waveform.waveform` and `waveform.peak_pressures`, and use it for shocked fields in p+, A_s and steepness, the recorders and the C.2 figures. Record in `metrics.json` whether it was applied. Raising K alone narrows the ripples but leaves the ≈ 9 % overshoot.
+  - [ ] **Convergence in the number of harmonics:** run at 6 ppw with `--harmonics 128` (and 256 if affordable). The filtered p+ and A_s should then change little. The current runs only check the grid, and A_s still moves 7 % (116 → 109 MPa) between 6 and 9 ppw. Add the K study to the convergence section of `c2_summary.json`.
+  - [ ] **Spatial convergence at 0.45 MPa:** the −6 dB p+ focal width changes 6 % between 6 and 9 ppw. Add a finer grid (e.g. 12 ppw) or a Richardson estimate before quoting focal sizes.
+  - [ ] Fill Table C.1 from the converged, filtered runs at every drive level (0.015, 0.15, 0.45, 0.7, 1.45 MPa).
 - [ ] **C.3 — linear propagation through skull phantoms** (Robertson et al., k-Wave, DRUM data). It uses a 60 mm aperture, 75 mm radius-of-curvature transducer at 1 MHz with a 3-cycle burst. The reported outputs are:
   - spatial-peak positive pressure;
   - focal position (centre of mass of the −6 dB volume);
