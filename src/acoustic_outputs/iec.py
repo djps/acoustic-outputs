@@ -15,6 +15,7 @@ pulse-average intensity equals the temporal-average intensity.
 from __future__ import annotations
 
 import math
+from typing import Any
 
 import numpy as np
 import scipy.fft as sfft
@@ -249,6 +250,91 @@ def shock_parameters(harmonics: ComplexArray, frequency: float) -> dict[str, flo
     rise = float(w[(j + half) % nt] - w[(j - half) % nt])
     steep = float(dpdt[j] / (omega * a1))
     return {"steepness": steep, "shock_amplitude": rise, "shocked": bool(steep > 3 and rise > a1)}
+
+
+#: the local spectral exponent s (|P_n| ~ n^-s) of the Fubini solution where its shock forms
+#: (sigma = 1, |P_n| = 2 J_n(n) / n ~ n^-4/3); before that it decays faster, and a developed
+#: shock (a jump) has s = 1
+SHOCK_EXPONENT = 4.0 / 3.0
+#: the least n |P_n| / |P_1| at the start of the band for a shock to be called: it keeps the
+#: numerical floor of the high harmonics (flat, so s < 1) from passing for a shock. A shock has
+#: n |P_n| ~ jump / pi, of the order of |P_1| (0.64 |P_1| for Fubini at sigma = 1)
+SHOCK_BAND_LEVEL = 0.1
+
+
+def shock_band(k: int) -> tuple[int, int]:
+    """The harmonics (first, last) whose decay tests for a shock: K/8 .. K/2, at least 2 .. 4.
+    Above the smooth low harmonics, and clear of the truncation at K."""
+    return max(2, k // 8), max(4, k // 2)
+
+
+def spectral_shock(harmonics: ComplexArray, axis: int = 0) -> dict[str, Any]:
+    """Shock parameters from the decay of the harmonics, at every point of ``harmonics`` (K along ``axis``).
+
+    A waveform with a jump of Delta p has |P_n| -> Delta p / (pi n), whatever the number of
+    harmonics; the jump is read from the spectrum, without the Gibbs overshoot of the waveform
+    rebuilt from K harmonics (which adds up to ~18 % to a rise measured on the waveform).
+
+    * ``exponent``: s of a least-squares fit |P_n| ~ n^-s over :func:`shock_band`; 4/3 where the
+      shock forms (:data:`SHOCK_EXPONENT`), 1 for a developed shock, larger before;
+    * ``band_level``: n |P_n| / |P_1| at the first harmonic of the band;
+    * ``shock_amplitude``: pi times the median of n |P_n| over the band [Pa], the jump of a
+      shock (NaN where there is none);
+    * ``shocked``: s <= 4/3 and ``band_level`` >= :data:`SHOCK_BAND_LEVEL`.
+
+    Needs K >= 8 (a band of at least three harmonics); with fewer, every entry is NaN / False.
+    """
+    a = np.abs(np.moveaxis(np.asarray(harmonics), axis, -1))
+    k = a.shape[-1]
+    rest = a.shape[:-1]
+    if k < 8:
+        nan = np.full(rest, math.nan)
+        return {"exponent": nan, "band_level": nan.copy(), "shock_amplitude": nan.copy(),
+                "shocked": np.zeros(rest, dtype=bool)}  # fmt: skip
+    lo, hi = shock_band(k)
+    n = np.arange(lo, hi + 1, dtype=float)
+    band = a[..., lo - 1 : hi].reshape(-1, n.size)
+    tiny = np.finfo(float).tiny
+    logn = np.log(n) - np.log(n).mean()
+    slope = (np.log(np.maximum(band, tiny)) @ logn) / (logn @ logn)
+    a1 = a[..., 0].reshape(-1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        level = np.where(a1 > 0, lo * band[:, 0] / a1, math.nan)
+    exponent = -slope
+    shocked = (exponent <= SHOCK_EXPONENT) & (level >= SHOCK_BAND_LEVEL)
+    amplitude = np.where(shocked, math.pi * np.median(n * band, axis=1), math.nan)
+    return {
+        "exponent": exponent.reshape(rest),
+        "band_level": level.reshape(rest),
+        "shock_amplitude": amplitude.reshape(rest),
+        "shocked": shocked.reshape(rest),
+    }
+
+
+def shock_formation(z: RealArray, harmonics: ComplexArray, axis: int = -1) -> dict[str, Any]:
+    """Where a shock first forms along a line of points ``z`` with harmonics (nz, K) (K along ``axis``).
+
+    The shock forms where the spectral exponent of :func:`spectral_shock` first falls to 4/3
+    (the Fubini solution at sigma = 1), at a point whose band is above the noise floor. The
+    position is interpolated linearly in the exponent between the last point before and the
+    first point at or past it. ``z`` is NaN (and ``index`` -1) if no shock forms.
+
+    Returns ``z``, ``index`` (the first point past the criterion), and the exponent and the
+    shock amplitude along the line (``exponent``, ``shock_amplitude``).
+    """
+    s = spectral_shock(harmonics, axis=axis)
+    e, ok = s["exponent"], s["shocked"]
+    hits = np.flatnonzero(ok)
+    out: dict[str, Any] = {"z": math.nan, "index": -1, "exponent": e, "shock_amplitude": s["shock_amplitude"]}
+    if hits.size == 0:
+        return out
+    j = int(hits[0])
+    zf = float(z[j])
+    if j > 0 and math.isfinite(e[j - 1]) and e[j - 1] > e[j]:
+        t = (e[j - 1] - SHOCK_EXPONENT) / (e[j - 1] - e[j])
+        zf = float(z[j - 1] + min(max(t, 0.0), 1.0) * (z[j] - z[j - 1]))
+    out.update(z=zf, index=j)
+    return out
 
 
 # -- exposure indices (IEC 62359) ---------------------------------------------------------

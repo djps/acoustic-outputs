@@ -34,6 +34,19 @@ step), the precision, threads and timings::
     pip install -e ".[examples]"    # pywave3d, k-wave-python, matplotlib
     python examples/benchmark_c2_pywave3d.py --workers 16
     python examples/benchmark_c2_pywave3d.py --p0 0.45e6 --harmonics 64
+
+With ``--slices`` (``xz``, ``yz`` or ``both``) and ``--xy-plane``, every run also keeps all the
+harmonics on the slices through the axis and on a window of an x-y plane, for waveforms off the
+axis (``examples/figure_bowl_c2_schlieren.py``). Their extents are pairs of points [m]: the slices
+from (s0, z0) to (s1, z1), s the transverse coordinate and z from the apex; the window from its
+bottom-left to its top-right corner (write negative values as decimals, -0.002, not -2e-3, which
+the command line takes for an option). The quasi-linear level, the slices over |s| <= 2 mm from
+z = 75 to 100 mm, and a 4 mm x 4 mm window of the focal plane, on the coarse grid only::
+
+    python examples/benchmark_c2_pywave3d.py --p0 0.15e6 --harmonics 32 --ppw 6 \\
+        --slices both --slice-extent -0.002 0.075 0.002 0.100 \\
+        --xy-plane --xy-extent -0.002 -0.002 0.002 0.002 \\
+        -o outputs/c2_pywave3d_p0_0.15MPa_slices --workers 16
 """
 
 from __future__ import annotations
@@ -85,18 +98,20 @@ RAYLEIGH_PPW = 8.0
 RADIAL_STEP_PER_WAVELENGTH = 1 / 16
 
 
-def recorder_for_acoustic_outputs(margin: int, plane_precision: str) -> Any:
+def recorder_for_acoustic_outputs(margin: int, plane_precision: str, record: dict[str, Any] | None = None) -> Any:
     """A factory of ``acoustic_outputs`` recorders to put in place of pyWave3D's (same arguments
     and methods). They leave out the ``margin`` points at each edge of the plane (the PML), so
     nothing recorded or stored includes the absorbing layer, and keep the whole planes (source,
-    face, focal, peak, final) at ``plane_precision``; the march itself stays in double precision."""
+    face, focal, peak, final) at ``plane_precision``; the march itself stays in double precision.
+    ``record`` holds further :class:`acoustic_outputs.RecordSettings` (the harmonic slices and the
+    x-y window: ``slices``, ``slice_extent``, ``xy_plane``, ``xy_extent``, ``xy_z``)."""
 
     def make(grid: Any, n_harmonics: int, **kwargs: Any) -> ao.PlaneRecorder:
         g = ao.Grid(nx=grid.nx, ny=grid.ny, nz=grid.nz, nt=grid.nt, dx=grid.dx, dy=grid.dy, dz=grid.dz,
                     x0=grid.x0, y0=grid.y0, z0=grid.z0)  # fmt: skip
         settings = kwargs.pop("settings")
         kwargs["settings"] = ao.RecordSettings(**dataclasses.asdict(settings), margin=margin,
-                                               plane_precision=plane_precision)  # fmt: skip
+                                               plane_precision=plane_precision, **(record or {}))  # fmt: skip
         return ao.PlaneRecorder(g, n_harmonics, **kwargs)
 
     return make
@@ -229,8 +244,8 @@ def numerics(bowl: FocusedBowl, grid: Any, layer: Any, settings: Any, operator: 
 
 
 def run(bowl: FocusedBowl, *, ppw: float, harmonics: int, half_width: float, z_start: float, z_end: float,
-        layer_width: float, nonlinear: bool, workers: int,
-        plane_precision: str = "single") -> tuple[ao.Results, dict[str, Any]]:  # fmt: skip
+        layer_width: float, nonlinear: bool, workers: int, plane_precision: str = "single",
+        record: dict[str, Any] | None = None) -> tuple[ao.Results, dict[str, Any]]:  # fmt: skip
     """March the bowl's field with pyWave3D, recorded by acoustic_outputs; the results and the numerics."""
 
     t_run = time.perf_counter()
@@ -255,7 +270,8 @@ def run(bowl: FocusedBowl, *, ppw: float, harmonics: int, half_width: float, z_s
                          origin=(-half_width, -half_width, z_start), source=source, layer=layer)  # fmt: skip
     margin = pml_margin(layer, grid)
     original = pw_solver.PlaneRecorder
-    pw_solver.PlaneRecorder = recorder_for_acoustic_outputs(margin, plane_precision)  # the march feeds acoustic_outputs
+    # the march feeds acoustic_outputs
+    pw_solver.PlaneRecorder = recorder_for_acoustic_outputs(margin, plane_precision, record)
     try:
         solver = pw.WaveSolver(model, grid, settings)
         log.info("grid: %s", solver.grid.summary())
@@ -319,6 +335,21 @@ def table_c1(res: ao.Results) -> dict[str, Any]:
     return out
 
 
+def record_settings(args: argparse.Namespace) -> dict[str, Any]:
+    """The RecordSettings of the slices and the x-y window from the command line (extents as pairs of points)."""
+    out: dict[str, Any] = {"slices": args.slices}
+    if args.slices != "none" and args.slice_extent is not None:
+        s0, z0, s1, z1 = args.slice_extent
+        out["slice_extent"] = ((s0, z0), (s1, z1))
+    if args.xy_plane:
+        out["xy_plane"] = True
+        if args.xy_extent is not None:
+            x0, y0, x1, y1 = args.xy_extent
+            out["xy_extent"] = ((x0, y0), (x1, y1))
+        out["xy_z"] = args.xy_z
+    return out
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("-o", "--output", type=Path, default=Path("outputs/c2_pywave3d"))
@@ -331,15 +362,28 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--plane-precision", choices=["single", "double"], default="single",
                         help="precision of the whole planes stored (the march is double precision)")  # fmt: skip
+    rec = parser.add_argument_group("harmonic slices and planes (for waveforms off the axis, e.g. schlieren images)")
+    rec.add_argument("--slices", choices=["none", "xz", "yz", "both"], default="none",
+                     help="keep all harmonics on the x-z and/or y-z slices through the axis")  # fmt: skip
+    rec.add_argument("--slice-extent", type=float, nargs=4, metavar=("S0", "Z0", "S1", "Z1"),
+                     help="the part of the slices kept, from (s0, z0) to (s1, z1) [m]: s is x (or y) and z is "
+                     "from the bowl's apex (default: the whole slices); negative values as decimals, "
+                     "-0.002 not -2e-3")  # fmt: skip
+    rec.add_argument("--xy-plane", action="store_true", help="keep all harmonics on a window of an x-y plane")
+    rec.add_argument("--xy-extent", type=float, nargs=4, metavar=("X0", "Y0", "X1", "Y1"),
+                     help="the window: bottom-left (x0, y0) and top-right (x1, y1) corners [m] (default: the "
+                     "whole plane)")  # fmt: skip
+    rec.add_argument("--xy-z", type=float, help="depth of that plane from the apex [m] (default: the focus)")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     logging.getLogger("pywave3d").setLevel(logging.WARNING)
 
     bowl = FocusedBowl(p0=args.p0, **C2)
     z_start = bowl.h + 3 * bowl.wavelength  # three wavelengths beyond the aperture plane
+    record = record_settings(args)
     common = {"harmonics": args.harmonics, "half_width": args.half_width, "z_start": z_start, "z_end": args.z_end,
-              "layer_width": args.layer, "workers": args.workers,
-              "plane_precision": args.plane_precision}  # fmt: skip
+              "layer_width": args.layer, "workers": args.workers, "plane_precision": args.plane_precision,
+              "record": record}  # fmt: skip
     args.output.mkdir(parents=True, exist_ok=True)
     summary: dict[str, Any] = {
         "benchmark": "IEC TS 63587 C.2: nonlinear focused field in water",
@@ -363,6 +407,7 @@ def main() -> None:
             "z_range_from_apex": [z_start, args.z_end],
             "recording": "acoustic_outputs.PlaneRecorder, fed by the march; the PML is left out of what is "
             f"recorded and stored, and whole planes are stored in {args.plane_precision} precision",
+            "harmonic_slices": record,
             "software": software(),
             "started": datetime.now(UTC).isoformat(timespec="seconds"),
         },

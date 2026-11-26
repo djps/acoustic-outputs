@@ -29,12 +29,15 @@ from typing import Any, Literal
 import numpy as np
 
 from acoustic_outputs import iec
-from acoustic_outputs._types import ComplexArray
+from acoustic_outputs._types import ComplexArray, RealArray
 from acoustic_outputs.grid import Grid
 from acoustic_outputs.results import FocalQuantity, Results
 from acoustic_outputs.waveform import peak_pressures
 
 log = logging.getLogger(__name__)
+
+#: a box of the sampled space as its two opposite corners, ((a0, b0), (a1, b1)) [m]
+Extent = tuple[tuple[float, float], tuple[float, float]]
 
 
 @dataclass
@@ -57,7 +60,20 @@ class RecordSettings:
             everything recorded, and the results' grid is the interior.
         plane_precision: precision of the whole planes kept (source, face, focal, spatial-peak
             and final): ``"single"`` halves their memory and size on disk. Everything computed
-            while recording uses the planes as given, at their own precision.
+            while recording uses the planes as given, at their own precision. The slices and
+            the x-y window below are kept at the same precision.
+        slices: keep all the harmonics on the longitudinal slices through the beam axis:
+            ``"xz"`` (y = axis), ``"yz"`` (x = axis), ``"both"`` or ``"none"``. They give the
+            waveforms off the axis at every recorded depth (e.g. a numerical schlieren image).
+        slice_extent: the part of the slices kept, as a pair of points (start, end) =
+            ((s0, z0), (s1, z1)) [m], s the transverse coordinate of the slice (x for ``xz``,
+            y for ``yz``, in the grid's coordinates) and z that of the planes. The grid points
+            and planes with s0 <= s <= s1 and z0 <= z <= z1 are kept. None: the whole slices.
+        xy_plane: keep all the harmonics on a window of an x-y plane.
+        xy_extent: the window, as its bottom-left and top-right corners ((x0, y0), (x1, y1))
+            [m]: the grid points with x0 <= x <= x1 and y0 <= y <= y1. None: the whole plane.
+        xy_z: the depth of that plane [m]: the recorded plane nearest it. None: the plane of the
+            focus (the maximum of ``focal_quantity`` on the axis).
     """
 
     focal_quantity: FocalQuantity = "p_positive"
@@ -71,6 +87,22 @@ class RecordSettings:
     workers: int = 1
     margin: int = 0
     plane_precision: Literal["double", "single"] = "double"
+    slices: Literal["none", "xz", "yz", "both"] = "none"
+    slice_extent: Extent | None = None
+    xy_plane: bool = False
+    xy_extent: Extent | None = None
+    xy_z: float | None = None
+
+
+def _window(coord: RealArray, lo: float, hi: float, name: str) -> slice:
+    """The contiguous grid indices with lo <= coord <= hi (to round-off)."""
+    if hi < lo:
+        raise ValueError(f"the extent in {name} runs backwards: {lo} to {hi}")
+    eps = 1e-9 * max(abs(float(coord[0])), abs(float(coord[-1])), 1e-3)
+    inside = np.flatnonzero((coord >= lo - eps) & (coord <= hi + eps))
+    if inside.size == 0:
+        raise ValueError(f"the extent {lo} to {hi} in {name} holds no grid point ({coord[0]} to {coord[-1]})")
+    return slice(int(inside[0]), int(inside[-1]) + 1)
 
 
 class PlaneRecorder:
@@ -157,6 +189,35 @@ class PlaneRecorder:
                 continue
             i, j = g.nearest(x, y)
             self._points[name] = {"pos": pos, "ij": (i, j), "distance": math.inf, "z": math.nan, "value": None}
+
+        # longitudinal slices through the axis, and a window of an x-y plane, with all harmonics
+        s = self.settings
+        if s.slices not in ("none", "xz", "yz", "both"):
+            raise ValueError(f"slices must be 'none', 'xz', 'yz' or 'both', not {s.slices!r}")
+        if s.slices in ("yz", "both") and g.ny == 1:
+            raise ValueError("a 2D field (ny = 1) has no y-z slice")
+        self._z_range = (-math.inf, math.inf)
+        self._slice_cols: dict[str, slice] = {}
+        if s.slices != "none":
+            (s0, z0), (s1, z1) = s.slice_extent if s.slice_extent is not None else ((-math.inf, -math.inf),
+                                                                                    (math.inf, math.inf))  # fmt: skip
+            if z1 < z0:
+                raise ValueError(f"the slice extent in z runs backwards: {z0} to {z1}")
+            self._z_range = (z0, z1)
+            for name, coord in (("xz", g.x), ("yz", g.y)):
+                if s.slices in (name, "both"):
+                    self._slice_cols[name] = _window(coord, s0, s1, name[0])
+        self._slices: dict[str, list[ComplexArray]] = {name: [] for name in self._slice_cols}
+        self._slice_z: list[float] = []
+        self._xy_cols: tuple[slice, slice] | None = None
+        self._xy: dict[str, Any] = {"distance": math.inf, "z": math.nan, "field": None}
+        if s.xy_plane:
+            if s.xy_extent is None:
+                self._xy_cols = (slice(None), slice(None))
+            else:
+                (x0, y0), (x1, y1) = s.xy_extent
+                wy = _window(g.y, y0, y1, "y") if g.ny > 1 else slice(None)
+                self._xy_cols = (_window(g.x, x0, x1, "x"), wy)
 
     @property
     def n_planes(self) -> int:
@@ -260,6 +321,16 @@ class PlaneRecorder:
             if d < p["distance"]:
                 i, j = p["ij"]
                 p.update(distance=d, z=float(z), value=f[:, i, j].astype(complex))
+        if self._slice_cols and self._z_range[0] <= z <= self._z_range[1]:
+            self._slice_z.append(float(z))
+            for name, cols in self._slice_cols.items():
+                line = f[:, cols, iy] if name == "xz" else f[:, ix, cols]
+                self._slices[name].append(line.astype(self._dtype))
+        if self._xy_cols is not None and s.xy_z is not None:
+            d = abs(z - s.xy_z)
+            if d < self._xy["distance"]:
+                self._xy.update(distance=d, z=float(z))
+                self._xy["field"] = self._keep(self._xy["field"], f[:, self._xy_cols[0], self._xy_cols[1]])
         self._last = f
 
     def _keep(self, buffer: ComplexArray | None, f: ComplexArray) -> ComplexArray:
@@ -290,6 +361,27 @@ class PlaneRecorder:
             points[name] = ((float(g.x[i]), float(g.y[j]), p["z"]), p["value"])
         peak = s.plane_peaks
         assert self._source is not None
+        kept: dict[str, Any] = {}
+        if self._slice_cols:
+            if not self._slice_z:
+                log.warning("no recorded plane lies in the slice extent %s: no slices kept", s.slice_extent)
+            else:
+                kept["slice_z"] = np.asarray(self._slice_z)
+                for name, cols in self._slice_cols.items():
+                    # (K, nz, n): harmonics first, as the planes
+                    kept[f"{name}_harmonics"] = np.stack(self._slices[name], axis=1)
+                    kept[f"{name}_coordinate"] = (g.x if name == "xz" else g.y)[cols].copy()
+        if self._xy_cols is not None:
+            cx, cy = self._xy_cols
+            if s.xy_z is None:  # the plane of the focus
+                assert self._focus["field"] is not None
+                kept["xy_harmonics"] = np.ascontiguousarray(self._focus["field"][:, cx, cy])
+                kept["xy_z"] = float(rows["z"][self._focus["index"]])
+            else:
+                kept["xy_harmonics"] = self._xy["field"]
+                kept["xy_z"] = self._xy["z"]
+            kept["xy_x"] = g.x[cx].copy()
+            kept["xy_y"] = g.y[cy].copy()
         return Results(
             grid=g,
             z=arr["z"],
@@ -329,5 +421,6 @@ class PlaneRecorder:
             source_amplitude=float(np.abs(self._source[0]).max()),
             frequency=self.frequency,
             axis_index=self.axis_index,
+            **kept,
             **extra,
         )

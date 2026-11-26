@@ -151,6 +151,12 @@ class Results:
             scheme (NaN if never, or not known).
         timings: seconds spent per part of the step.
         axis_index: (i, j) of the beam axis on the plane (None: the plane centre).
+        slice_z: the planes of the kept slices, (nzs,) (``RecordSettings.slices``).
+        xz_harmonics, yz_harmonics: all the harmonics on the slices through the axis along x
+            (at the axis' y) and along y, (K, nzs, n), over ``RecordSettings.slice_extent``.
+        xz_coordinate, yz_coordinate: x of ``xz_harmonics`` and y of ``yz_harmonics``.
+        xy_harmonics: all the harmonics on a window of an x-y plane, (K, nxw, nyw)
+            (``RecordSettings.xy_plane``), at x ``xy_x``, y ``xy_y`` and depth ``xy_z``.
     """
 
     grid: Grid
@@ -195,6 +201,15 @@ class Results:
     godunov_from: float = math.nan
     timings: dict[str, float] = field(default_factory=dict)
     axis_index: tuple[int, int] | None = None
+    slice_z: RealArray | None = None
+    xz_harmonics: ComplexArray | None = None
+    yz_harmonics: ComplexArray | None = None
+    xz_coordinate: RealArray | None = None
+    yz_coordinate: RealArray | None = None
+    xy_harmonics: ComplexArray | None = None
+    xy_x: RealArray | None = None
+    xy_y: RealArray | None = None
+    xy_z: float = math.nan
 
     @property
     def axis_ij(self) -> tuple[int, int]:
@@ -251,6 +266,12 @@ class Results:
         nt = nt or 8 * harmonics.shape[0]
         t = np.arange(nt) / (nt * self.frequency)
         return t, waveform(harmonics.reshape(-1, 1), nt)[:, 0]
+
+    def shock_formation(self) -> dict[str, Any]:
+        """Where a shock first forms on the beam axis (:func:`acoustic_outputs.iec.shock_formation`):
+        the first z where the local spectral exponent of the harmonics falls to 4/3, with the
+        exponent and the spectral shock amplitude at every recorded plane."""
+        return iec.shock_formation(self.z, self.axis, axis=1)
 
     # -- metrics -------------------------------------------------------------------------
 
@@ -413,6 +434,26 @@ class Results:
         out["iec"] = self.iec_metrics(prof)
         return out
 
+    def _spectral_shock_metrics(self) -> dict[str, Any]:
+        """The spectral shock parameters at the focus, and where the shock forms on the axis."""
+        i = self.focal_index
+        sf = self.shock_formation()
+        e, amp = sf["exponent"], sf["shock_amplitude"]
+        zf = sf["z"]
+        k = self.axis.shape[1]
+        lo, hi = iec.shock_band(k)
+        return {
+            "spectral_exponent": float(e[i]),
+            "shock_amplitude_spectral": float(amp[i]),
+            "shocked_spectral": bool(math.isfinite(amp[i])),
+            "shock_formation": {
+                "z": zf,
+                "distance_to_focus": float(self.z[i] - zf) if math.isfinite(zf) else math.nan,
+                "criterion": f"spectral exponent s <= 4/3 (|P_n| ~ n^-s over n = {lo} .. {hi} of {k}), "
+                f"with n |P_n| / |P_1| >= {iec.SHOCK_BAND_LEVEL:g} at n = {lo}",
+            },
+        }
+
     def iec_metrics(self, prof: RealArray | None = None) -> dict[str, Any]:
         """The IEC field parameters (see ``docs/iec_outputs.md`` and :mod:`acoustic_outputs.iec`)."""
         g = self.grid
@@ -455,6 +496,7 @@ class Results:
                 if focus_h.size > 1 and focus_h[0] != 0
                 else math.nan,
                 **iec.shock_parameters(focus_h, f0),
+                **self._spectral_shock_metrics(),
             },
         }
 

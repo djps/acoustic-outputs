@@ -116,7 +116,7 @@ The options that control these outputs are under `Solver.Metrics`: `focal_quanti
 | Parameter | Use | Computation from the planes | Status and where |
 | --- | --- | --- | --- |
 | Degree of nonlinear distortion | whether the field is nonlinear, and so whether low-drive extrapolation is valid (62556) | p_c/p_r and \|P_2\|/\|P_1\| at the focus; a second run at another amplitude (or linear) shows the departure from linear scaling | recorded: `iec.nonlinear.p_c_over_p_r`, `P2_over_P1` |
-| Steepness, shock formation, shock amplitude | where shocks form and how large they are (histotripsy, boiling histotripsy) | max dp/dt over ω\|P_1\| (1 for a sinusoid); the rise across the steepest part over T/K; the z where the Godunov scheme takes over | recorded: `iec.nonlinear.steepness`, `shock_amplitude`, `shocked`, `godunov_from_z` |
+| Steepness, shock formation, shock amplitude | where shocks form and how large they are (histotripsy, boiling histotripsy) | max dp/dt over ω\|P_1\| (1 for a sinusoid); the rise across the steepest part over T/K (it includes the Gibbs overshoot of the K harmonics, up to ~18 %); from the spectrum, the local exponent s of \|P_n\| ~ n^−s over n = K/8 .. K/2 (4/3 where the Fubini solution forms a shock, 1 for a developed shock) and the jump π n\|P_n\| (`iec.spectral_shock`); the first z on the axis where s falls to 4/3 (`Results.shock_formation`); the z where the Godunov scheme takes over | recorded: `iec.nonlinear.steepness`, `shock_amplitude`, `shocked`, `spectral_exponent`, `shock_amplitude_spectral`, `shocked_spectral`, `shock_formation.z`, `shock_formation.distance_to_focus`, `godunov_from_z` |
 
 ## Practical notes
 
