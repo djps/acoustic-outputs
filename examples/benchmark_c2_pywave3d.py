@@ -29,11 +29,20 @@ harmonic), the time sampling (samples per period, dt), the march (Strang splitti
 number of steps), the nonlinear step (method, thresholds, Godunov time step and CFL, where the
 shock-capturing scheme took over, the number of steps of each kind and their sub-steps), the PML
 (width, strength, profile, reflection), the source plane (position, Rayleigh quadrature, radial
-step), the precision, threads and timings::
+step), the precision, threads and timings.
+
+Two precisions are set apart. ``--solver-precision`` (``double``, the default, or ``single``) is
+that of the march itself: the field, the propagators, the PML, the FFTs and the nonlinear step
+are all complex128 or all complex64 (pyWave3D's ``Solver.precision``). Single precision halves
+the memory of the march (about 26 copies of one K x nx x ny field). ``--plane-precision``
+(``single``, the default, or ``double``) is only that of the whole planes the recorder keeps.
+The axis, the lines through it and every derived quantity are kept in double precision either
+way::
 
     pip install -e ".[examples]"    # pywave3d, k-wave-python, matplotlib
     python examples/benchmark_c2_pywave3d.py --workers 16
     python examples/benchmark_c2_pywave3d.py --p0 0.45e6 --harmonics 64
+    python examples/benchmark_c2_pywave3d.py --p0 0.45e6 --harmonics 128 --solver-precision single
 
 With ``--slices`` (``xz``, ``yz`` or ``both``) and ``--xy-plane``, every run also keeps all the
 harmonics on the slices through the axis and on a window of an x-y plane, for waveforms off the
@@ -155,15 +164,18 @@ def software() -> dict[str, Any]:
 
 
 def setup(bowl: FocusedBowl, *, ppw: float, harmonics: int, half_width: float, z_start: float, z_end: float,
-          layer_width: float, nonlinear: bool, workers: int) -> tuple[Any, Any, Any, Any]:  # fmt: skip
-    """pyWave3D's medium, grid, absorbing layer and settings of a run."""
+          layer_width: float, nonlinear: bool, workers: int,
+          solver_precision: str = "double") -> tuple[Any, Any, Any, Any]:  # fmt: skip
+    """pyWave3D's medium, grid, absorbing layer and settings of a run (the march in
+    ``solver_precision``, ``"double"`` or ``"single"``)."""
     medium = pw.Medium(sound_speed=bowl.sound_speed, density=bowl.density, nonlinearity=BETA, diffusivity=DIFFUSIVITY)
     lx = 2 * half_width
     grid = pw.Grid.from_lengths(lx, lx, z_end - z_start, wavelength=bowl.wavelength,
                                 points_per_wavelength=(ppw, ppw, ppw), nt=2 * harmonics,
                                 origin=(-half_width, -half_width, z_start))  # fmt: skip
     layer = AbsorbingLayer.for_reflection(layer_width, reflection=PML_REFLECTION, kind="pml")
-    settings = pw.SolverSettings(nonlinearity=nonlinear, absorbing_layer=True, workers=workers)
+    settings = pw.SolverSettings(nonlinearity=nonlinear, absorbing_layer=True, workers=workers,
+                                 single_precision=solver_precision == "single")  # fmt: skip
     return medium, grid, layer, settings
 
 
@@ -245,6 +257,7 @@ def numerics(bowl: FocusedBowl, grid: Any, layer: Any, settings: Any, operator: 
 
 def run(bowl: FocusedBowl, *, ppw: float, harmonics: int, half_width: float, z_start: float, z_end: float,
         layer_width: float, nonlinear: bool, workers: int, plane_precision: str = "single",
+        solver_precision: str = "double",
         record: dict[str, Any] | None = None) -> tuple[ao.Results, dict[str, Any]]:  # fmt: skip
     """March the bowl's field with pyWave3D, recorded by acoustic_outputs; the results and the numerics."""
 
@@ -252,7 +265,8 @@ def run(bowl: FocusedBowl, *, ppw: float, harmonics: int, half_width: float, z_s
     lam = bowl.wavelength
     medium, grid, layer, settings = setup(bowl, ppw=ppw, harmonics=harmonics, half_width=half_width,
                                           z_start=z_start, z_end=z_end, layer_width=layer_width,
-                                          nonlinear=nonlinear, workers=workers)  # fmt: skip
+                                          nonlinear=nonlinear, workers=workers,
+                                          solver_precision=solver_precision)  # fmt: skip
     # the source plane: the bowl's field at z_start (Rayleigh integral, exp(+i omega t) as pyWave3D),
     # axisymmetric about the grid's beam axis (the point nx/2, ny/2)
     xc, yc = grid.x[grid.nx // 2], grid.y[grid.ny // 2]
@@ -361,7 +375,10 @@ def main() -> None:
     parser.add_argument("--z-end", type=float, default=0.120, help="last plane, from the apex [m]")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--plane-precision", choices=["single", "double"], default="single",
-                        help="precision of the whole planes stored (the march is double precision)")  # fmt: skip
+                        help="precision of the whole planes stored (not of the march: --solver-precision)")  # fmt: skip
+    parser.add_argument("--solver-precision", choices=["double", "single"], default="double",
+                        help="precision of the march: complex128 (double) or complex64 (single) fields, "
+                        "propagators, FFTs and nonlinear step")  # fmt: skip
     rec = parser.add_argument_group("harmonic slices and planes (for waveforms off the axis, e.g. schlieren images)")
     rec.add_argument("--slices", choices=["none", "xz", "yz", "both"], default="none",
                      help="keep all harmonics on the x-z and/or y-z slices through the axis")  # fmt: skip
@@ -383,7 +400,7 @@ def main() -> None:
     record = record_settings(args)
     common = {"harmonics": args.harmonics, "half_width": args.half_width, "z_start": z_start, "z_end": args.z_end,
               "layer_width": args.layer, "workers": args.workers, "plane_precision": args.plane_precision,
-              "record": record}  # fmt: skip
+              "solver_precision": args.solver_precision, "record": record}  # fmt: skip
     args.output.mkdir(parents=True, exist_ok=True)
     summary: dict[str, Any] = {
         "benchmark": "IEC TS 63587 C.2: nonlinear focused field in water",
@@ -407,6 +424,7 @@ def main() -> None:
             "z_range_from_apex": [z_start, args.z_end],
             "recording": "acoustic_outputs.PlaneRecorder, fed by the march; the PML is left out of what is "
             f"recorded and stored, and whole planes are stored in {args.plane_precision} precision",
+            "solver_precision": args.solver_precision,
             "harmonic_slices": record,
             "software": software(),
             "started": datetime.now(UTC).isoformat(timespec="seconds"),

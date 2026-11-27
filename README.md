@@ -4,14 +4,12 @@
 [![Coverage Status](https://coveralls.io/repos/github/djps/acoustic-outputs/badge.svg?branch=main)](https://coveralls.io/github/djps/acoustic-outputs?branch=main)
 [![made-with-python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-yellow.svg)](./LICENSE.md)
+[![PyPI version](https://img.shields.io/pypi/v/acoustic-outputs)](https://pypi.org/project/acoustic-outputs/)
 
-This repository tries to derive acoustic field parameters from the output of any acoustic solver: beam metrics, and the parameters defined in standards IEC 62127-1, 61828, TS 62556, 62359 and 61689.
+This repository tries to derive acoustic field parameters from the output of any acoustic solver: beam metrics, and the parameters defined in standards IEC 62127-1, 61828, TS 62556, 62359 and 61689. They are, at present, computed from the harmonics of a steady periodic field on planes across the beam.
 
-They are computed from the harmonics of a steady periodic field on planes across the beam.
-
-Frequency-domain output gives those harmonics directly.
-
-Time-domain output gives the pressure in time, and its harmonics are fitted over a steady window.
+  - Frequency-domain output gives those harmonics directly.
+  - Time-domain output gives the pressure in time, and its harmonics are fitted over a steady window.
 
 Both are supported, on regular grids, on axisymmetric (r, z) grids and meshes, and on unstructured 3D meshes.
 
@@ -129,7 +127,7 @@ IEC TS 63587 (measurement-based simulation) asks for a simulation model to be be
 
 - **The analytic solution:** `FocusedBowl.axial_pressure`, in a form that stays finite at the geometric focus, plus the focal values (C.2, C.3) and the beam maximum point (the maximum of ppsi on the axis; it lies before the geometric focus).
 - **The whole field:** the Rayleigh integral over the bowl by Gauss–Legendre quadrature (`FocusedBowl.rayleigh`), on and off the axis. It agrees with the analytic axis to 1e-14.
-- **A comparison for any solver's output:** `compare_axis(results, bowl, apex_z=...)` takes the `Results` of any reader in this package (k-Wave, FOCUS, OptimUS, finite elements, ...). It reports the TS 63587 error norms (relative L2 and L∞, 3.43–3.46) of |p| and of the complex pressure on the axis, |p| at the geometric focus, and the beam maximum's position and value. `compare_longitudinal` does the same for |p| on the longitudinal plane.
+- **A comparison for any solver's output:** `compare_axis(results, bowl, apex_z=...)` takes the `Results` of any reader in this package (k-Wave, FOCUS, OptimUS, finite elements, ...). It reports the TS 63587 error norms (relative $L_2$ and $L_{\infty}$) of $|p|$ and of the complex pressure on the axis, $|p|$ at the geometric focus, and the beam maximum's position and value. `compare_longitudinal` does the same for |p| on the longitudinal plane.
 - **A built-in run with a convergence study:** `run_bowl_benchmark` writes the report that Annex C asks for (inputs, how they enter the model, discrepancies, convergence). Its default model is an angular-spectrum projection from a Rayleigh source plane (`acoustic_outputs.propagation`), a genuine numerical model whose error depends on its sampling, window and padding. `method="rayleigh"` checks the processing alone, which should agree to round-off.
 
 ```bash
@@ -138,7 +136,7 @@ acoustic-outputs --benchmark bowl --set attenuation=5 --set "spacings=[0.00037]"
 python examples/benchmark_c1_bowl.py --results my_solver.npz --apex-z 0 --frequency 1e6 --sound-speed 1485 --density 998
 ```
 
-With the default C.2 transducer (F-number 0.9) at 2 and 4 grid points per wavelength, the angular-spectrum model's axial |p| agrees with the analytic solution to 5e-4 (relative L2), and its beam maximum to 2e-4 in pressure and 4 µm in position. For a small, strongly focused bowl (20 mm aperture, 30 mm ROC), the error falls from 5e-4 to 2e-4 as the grid goes from 2 to 4 points per wavelength. The outputs are `benchmark.json`, `benchmark_axis.txt` (z, analytic and simulated |p|) and the usual `metrics.json`, `axial.txt`, ... of the finest run.
+With the default C.2 transducer (F-number 0.9) at 2 and 4 grid points per wavelength, the angular-spectrum model's axial $|p|$ agrees with the analytic solution to 5e-4 (relative $L_2$), and its beam maximum to 2e-4 in pressure and 4 µm in position. For a small, strongly focused bowl (20 mm aperture, 30 mm ROC), the error falls from 5e-4 to 2e-4 as the grid goes from 2 to 4 points per wavelength. The outputs are `benchmark.json`, `benchmark_axis.txt` ($z$, analytic and simulated $|p|$) and the usual `metrics.json`, `axial.txt`, ... of the finest run.
 
 ## Datasets
 
@@ -178,13 +176,13 @@ Every kind also takes these optional keys:
 - **Sensor blocks.** Sensors must cover a rectangular block of grid points, such as a plane or a volume. fullwave25's sparse-grid whole-domain recording is not supported; use a sensor mask instead.
 - **Exact intensity.** The exact (angular-spectrum) intensity assumes a one-way field. Where a time-domain record holds reflections, it is approximate.
 - **BabelBrain.**
-  - **One frequency:** BabelBrain simulates only the fundamental, so p+ = |p−| and there are no nonlinear parameters.
-  - **Intensities:** they use rho c of the material at the target, so they are approximate in skull and skin.
+  - **One frequency:** BabelBrain simulates only the fundamental, so $p_+$ = $|p_{−}|$ and there are no nonlinear parameters.
+  - **Intensities:** they use $\rho c$ of the material at the target, so they are approximate in skull and skin.
   - **Normalised files:** the `*_NORM.nii.gz` files are normalised to 1, so they carry no absolute values. Use `DataForSim.h5`.
-  - **Direction:** the beam's direction along z is decided from the power on the end planes (`direction` overrides it). A beam travelling towards −z is reported with z negated.
+  - **Direction:** the beam's direction along $z$ is decided from the power on the end planes (`direction` overrides it). A beam travelling towards −z is reported with z negated.
   - **Checked against:** the reader is tested on files written as BabelViscoFDTD's `SaveToH5py` writes them, including blosc compression. It has not yet been run on a real BabelBrain simulation.
 - **mSOUND.**
-  - **Conventions, from its source:** the frequency-domain fields are p = Re P exp(+iωt) in absolute phase (the propagator is exp(iK dz) with K = −√(ω²/c0² − k⊥²)), |P| is the peak amplitude, and plane i is (i − 1) dz from the source plane. The time-domain records start at t = 0 and are periodic over the window.
+  - **Conventions, from its source:** the frequency-domain fields are $p = \mathfrak{Re} \{ P \exp{+i \omega t} \}$ in absolute phase (the propagator is exp(iK dz) with K = −√(ω²/c0² − k⊥²)), |P| is the peak amplitude, and plane i is (i − 1) dz from the source plane. The time-domain records start at $t = 0$ and are periodic over the window.
   - **z:** mgrid.z is centred on 0 and is not the distance from the source, so it is ignored; give `z0` for the source plane's position.
   - **Medium:** a heterogeneous `medium.rho` can't be used for the intensities: `medium.rho0`, or `--density`, is needed.
   - **Checked against:** mSOUND v0.1 run in GNU Octave 10. `Forward2D_fund` and `Forward3D_fund` match an angular-spectrum propagation of their own source plane to round-off, and the fit of `Forward2D`'s and `Forward3D`'s CW records matches them to 1e-5 or better.
@@ -200,8 +198,8 @@ Every kind also takes these optional keys:
   - **Source:** with the model, the frequency, the exterior medium, the source axis and location and a bowl's radius of curvature (for the focal shift) are read from it. Planes behind the source are left out. The `.mat` export holds none of these: give them.
   - **Checked against:** the Gaussian beam's fundamental, written as OptimUS's postprocess objects and `.mat` export write it, along ±x, y and −z, from an offset source: the 3D metrics to 1e-9, and from a plane through the axis to 2e-4. OptimUS itself has not been run here (it runs in its Docker image).
 - **Axisymmetric fields.**
-  - **Revolution:** each plane is revolved onto a square (x, y) grid of spacing `dx` (default the smallest radial spacing) out to `r_max` (default the last radius), by a cubic spline of the profile's even extension, so the slope on the axis is zero. Power, areas, widths and the IEC indices are those of the 3D beam. The beam axis is r = 0.
-  - **Cost:** a plane holds (2 r_max / dx + 1)² points. A large radius at a fine spacing is slow; use `r_max` and `dx` to bound it.
+  - **Revolution:** each plane is revolved onto a square (x, y) grid of spacing `dx` (default the smallest radial spacing) out to `r_max` (default the last radius), by a cubic spline of the profile's even extension, so the slope on the axis is zero. Power, areas, widths and the IEC indices are those of the 3D beam. The beam axis is $r = 0$.
+  - **Cost:** a plane holds (2 `r_max` / `dx` + 1)² points. A large radius at a fine spacing is slow; use `r_max` and `dx` to bound it.
   - **Finite-element nodes** are resampled on an (r, z) grid (spacing `spacing`, default the median node spacing) by linear interpolation over the mesh cells (or a Delaunay triangulation of the nodes, less its triangles with an edge more than 5 times the median, which would bridge a concave part of the domain). An absolute-phase field has its carrier exp(−inkz) removed at the nodes first, so that only the smooth envelope is interpolated. Time series at the nodes are fitted there first. High-order solutions are best sampled in DOLFINx itself: `sample_dolfinx_rz` (frequency domain) or a `DolfinxProbe` (time domain) evaluates them exactly, in parallel, on the (r, z) grid.
   - **XDMF:** a frequency-domain file holds complex functions (one per harmonic); a time-domain file holds a real function written at every saved step, of which only the steps of the fitted window are read. DOLFINx writes the values at the geometry nodes, so a function must have the mesh's degree (for example P1 on a linear mesh); complex functions come as `real_<name>` and `imag_<name>`, which are joined. Triangles and quadrilaterals, of any degree, are read; ADIOS2 `.bp` (VTX) files are not.
   - **Checked against:** the Gaussian beam on an (r, z) grid gives the metrics of the same beam in 3D to 2e-4, and at the nodes of an unstructured mesh 0.25 mm apart to 0.5%. The XDMF reader is tested on files laid out as DOLFINx writes them, not on files written by DOLFINx itself. `sample_dolfinx_rz` and `DolfinxProbe` have not been run: DOLFINx is not a dependency.
@@ -263,3 +261,8 @@ pytest          # about 40 s; tests/test_kwave.py runs k-wave-python if it is in
 - **Real k-Wave run:** a k-wave-python CW run is compared with an angular-spectrum projection of its own first plane. They agree to within 6% of the peak.
 
 Set `ACOUSTIC_OUTPUTS_NO_BEARTYPE=1` to turn off run-time type checking.
+
+
+## Licence
+
+MIT; see [LICENSE](LICENSE)
