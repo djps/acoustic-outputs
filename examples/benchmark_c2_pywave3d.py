@@ -43,6 +43,21 @@ way::
     python examples/benchmark_c2_pywave3d.py --workers 16
     python examples/benchmark_c2_pywave3d.py --p0 0.45e6 --harmonics 64
     python examples/benchmark_c2_pywave3d.py --p0 0.45e6 --harmonics 128 --solver-precision single
+    python examples/benchmark_c2_pywave3d.py --diffraction pade --pade-order 3
+    python examples/benchmark_c2_pywave3d.py --p0 0.45e6 --harmonics 128 --shock-smoothing adaptive
+
+``--shock-smoothing`` (``none``, the default, ``adaptive`` or ``axial``; pyWave3D >= 0.3) adds
+artificial absorption against the Gibbs oscillations of shocks truncated to K harmonics, in the
+nonlinear runs only (the linear check is left as it is). ``adaptive`` (Maxwell et al. 2017) acts
+at each shock, in the Godunov step, and holds it at a rise time of ``--rise-points`` steps
+T / (2K) of the time grid; ``axial`` (Yuldashev and Khokhlova 2011) multiplies the diffusivity by
+``--smoothing-peak`` around the focus (0.96 to 1.03 of the distance from the source plane to the
+geometric focus) and by ``--smoothing-post`` after it.
+
+``--diffraction`` chooses pyWave3D's diffraction operator: ``full`` (the exact one-way angular
+spectrum, the default), ``parabolic`` (KZK) or ``pade``, the [m/m] Pade approximant of the exact
+operator (the wide-angle parabolic equation of order m = ``--pade-order``, 1 to 3), which needs a
+pyWave3D that has it.
 
 With ``--slices`` (``xz``, ``yz`` or ``both``) and ``--xy-plane``, every run also keeps all the
 harmonics on the slices through the axis and on a window of an x-y plane, for waveforms off the
@@ -165,18 +180,47 @@ def software() -> dict[str, Any]:
 
 def setup(bowl: FocusedBowl, *, ppw: float, harmonics: int, half_width: float, z_start: float, z_end: float,
           layer_width: float, nonlinear: bool, workers: int,
-          solver_precision: str = "double") -> tuple[Any, Any, Any, Any]:  # fmt: skip
+          solver_precision: str = "double", diffraction: str = "full",
+          pade_order: int = 1, smoothing: Any = None) -> tuple[Any, Any, Any, Any]:  # fmt: skip
     """pyWave3D's medium, grid, absorbing layer and settings of a run (the march in
-    ``solver_precision``, ``"double"`` or ``"single"``)."""
+    ``solver_precision``, ``"double"`` or ``"single"``; the diffraction operator ``"full"``,
+    ``"parabolic"`` or ``"pade"`` of order ``pade_order``)."""
     medium = pw.Medium(sound_speed=bowl.sound_speed, density=bowl.density, nonlinearity=BETA, diffusivity=DIFFUSIVITY)
     lx = 2 * half_width
     grid = pw.Grid.from_lengths(lx, lx, z_end - z_start, wavelength=bowl.wavelength,
                                 points_per_wavelength=(ppw, ppw, ppw), nt=2 * harmonics,
                                 origin=(-half_width, -half_width, z_start))  # fmt: skip
     layer = AbsorbingLayer.for_reflection(layer_width, reflection=PML_REFLECTION, kind="pml")
+    operator: dict[str, Any] = {"paraxial": diffraction == "parabolic"}
+    if diffraction == "pade":  # (only then: older pyWave3D has no pade_order)
+        operator["pade_order"] = pade_order
+    if smoothing is not None and nonlinear:  # shock smoothing: the nonlinear runs only
+        operator["shock_smoothing"] = smoothing
     settings = pw.SolverSettings(nonlinearity=nonlinear, absorbing_layer=True, workers=workers,
-                                 single_precision=solver_precision == "single")  # fmt: skip
+                                 single_precision=solver_precision == "single", **operator)  # fmt: skip
     return medium, grid, layer, settings
+
+
+def smoothing_record(smoothing: Any) -> dict[str, Any] | None:
+    """The shock smoothing of a run, for the report (None: none)."""
+    if smoothing is None:
+        return None
+    kind = "adaptive (Maxwell et al. 2017)" if type(smoothing).__name__ == "AdaptiveSmoothing" else \
+        "axial (Yuldashev and Khokhlova 2011)"  # fmt: skip
+    return {"kind": kind, **dataclasses.asdict(smoothing)}
+
+
+def diffraction_operator(settings: Any) -> str:
+    """pyWave3D's diffraction operator, in words."""
+    order = getattr(settings, "pade_order", 0)
+    if settings.paraxial:
+        return "paraxial (KZK)"
+    if order:
+        return (
+            f"Pade [{order}/{order}] approximant of the exact operator (wide-angle, order {order}), "
+            "on the propagating components; evanescent ones decay exactly"
+        )
+    return "exact angular spectrum (one-way, non-paraxial)"
 
 
 def numerics(bowl: FocusedBowl, grid: Any, layer: Any, settings: Any, operator: Any, *, ppw: float, z_start: float,
@@ -205,8 +249,7 @@ def numerics(bowl: FocusedBowl, grid: Any, layer: Any, settings: Any, operator: 
             "record_every": settings.record_every,
         },
         "linear_step": {
-            "diffraction": "exact angular spectrum (one-way, non-paraxial)" if not settings.paraxial
-            else "paraxial (KZK)",
+            "diffraction": diffraction_operator(settings),
             "absorption": "thermoviscous, diffusivity delta" if settings.absorption else "off",
             "harmonic_tolerance": settings.harmonic_tolerance,
         },
@@ -251,13 +294,15 @@ def numerics(bowl: FocusedBowl, grid: Any, layer: Any, settings: Any, operator: 
             "cfl": settings.cfl,
             "godunov_from_z": None if math.isnan(res.godunov_from) else res.godunov_from,
             "substeps": stats if stats is not None else "not recorded (the run predates this record)",
+            "shock_smoothing": smoothing_record(getattr(settings, "shock_smoothing", None)),
         }  # fmt: skip
     return out
 
 
 def run(bowl: FocusedBowl, *, ppw: float, harmonics: int, half_width: float, z_start: float, z_end: float,
         layer_width: float, nonlinear: bool, workers: int, plane_precision: str = "single",
-        solver_precision: str = "double",
+        solver_precision: str = "double", diffraction: str = "full", pade_order: int = 1,
+        smoothing: Any = None,
         record: dict[str, Any] | None = None) -> tuple[ao.Results, dict[str, Any]]:  # fmt: skip
     """March the bowl's field with pyWave3D, recorded by acoustic_outputs; the results and the numerics."""
 
@@ -266,7 +311,8 @@ def run(bowl: FocusedBowl, *, ppw: float, harmonics: int, half_width: float, z_s
     medium, grid, layer, settings = setup(bowl, ppw=ppw, harmonics=harmonics, half_width=half_width,
                                           z_start=z_start, z_end=z_end, layer_width=layer_width,
                                           nonlinear=nonlinear, workers=workers,
-                                          solver_precision=solver_precision)  # fmt: skip
+                                          solver_precision=solver_precision, diffraction=diffraction,
+                                          pade_order=pade_order, smoothing=smoothing)  # fmt: skip
     # the source plane: the bowl's field at z_start (Rayleigh integral, exp(+i omega t) as pyWave3D),
     # axisymmetric about the grid's beam axis (the point nx/2, ny/2)
     xc, yc = grid.x[grid.nx // 2], grid.y[grid.ny // 2]
@@ -301,6 +347,8 @@ def run(bowl: FocusedBowl, *, ppw: float, harmonics: int, half_width: float, z_s
                 stats[f"{method}_steps"] = stats.get(f"{method}_steps", 0) + 1
                 stats["max"] = max(stats["max"], op.last_substeps)
                 stats["total"] += op.last_substeps
+                artificial = getattr(op, "last_artificial_diffusivity", 0.0)
+                stats["max_artificial_diffusivity"] = max(stats.get("max_artificial_diffusivity", 0.0), artificial)
                 return method
 
             op.apply = counted
@@ -379,6 +427,32 @@ def main() -> None:
     parser.add_argument("--solver-precision", choices=["double", "single"], default="double",
                         help="precision of the march: complex128 (double) or complex64 (single) fields, "
                         "propagators, FFTs and nonlinear step")  # fmt: skip
+    parser.add_argument(
+        "--diffraction",
+        choices=["full", "parabolic", "pade"],
+        default="full",
+        help="diffraction operator: exact angular spectrum, KZK, or a Pade approximant of the exact one",
+    )
+    parser.add_argument(
+        "--shock-smoothing",
+        choices=["none", "adaptive", "axial"],
+        default="none",
+        help="artificial absorption against shock oscillations, nonlinear runs only",
+    )
+    parser.add_argument(
+        "--rise-points",
+        type=float,
+        default=7.0,
+        help="adaptive smoothing: shock rise time in steps T/(2K) of the time grid",
+    )
+    parser.add_argument(
+        "--smoothing-peak", type=float, default=5.0, help="axial smoothing: diffusivity multiplier around the focus"
+    )
+    parser.add_argument(
+        "--smoothing-post", type=float, default=1.0, help="axial smoothing: diffusivity multiplier after the focus"
+    )
+    parser.add_argument("--pade-order", type=int, choices=[1, 2, 3], default=None,
+                        help="order of the Pade operator (default 1; implies --diffraction pade)")  # fmt: skip
     rec = parser.add_argument_group("harmonic slices and planes (for waveforms off the axis, e.g. schlieren images)")
     rec.add_argument("--slices", choices=["none", "xz", "yz", "both"], default="none",
                      help="keep all harmonics on the x-z and/or y-z slices through the axis")  # fmt: skip
@@ -395,12 +469,24 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     logging.getLogger("pywave3d").setLevel(logging.WARNING)
 
+    if args.pade_order is not None and args.diffraction == "full":
+        args.diffraction = "pade"
+    if args.pade_order is not None and args.diffraction != "pade":
+        parser.error(f"--pade-order needs --diffraction pade, not {args.diffraction}")
+    pade_order = args.pade_order or 1
     bowl = FocusedBowl(p0=args.p0, **C2)
     z_start = bowl.h + 3 * bowl.wavelength  # three wavelengths beyond the aperture plane
     record = record_settings(args)
+    smoothing: Any = None
+    if args.shock_smoothing == "adaptive":
+        smoothing = pw.AdaptiveSmoothing(rise_points=args.rise_points)
+    elif args.shock_smoothing == "axial":  # about the geometric focus, z measured from the source plane
+        smoothing = pw.AxialSmoothing(focal_length=bowl.D - z_start, peak_multiplier=args.smoothing_peak,
+                                      post_focal_multiplier=args.smoothing_post)  # fmt: skip
     common = {"harmonics": args.harmonics, "half_width": args.half_width, "z_start": z_start, "z_end": args.z_end,
               "layer_width": args.layer, "workers": args.workers, "plane_precision": args.plane_precision,
-              "solver_precision": args.solver_precision, "record": record}  # fmt: skip
+              "solver_precision": args.solver_precision, "diffraction": args.diffraction,
+              "pade_order": pade_order, "smoothing": smoothing, "record": record}  # fmt: skip
     args.output.mkdir(parents=True, exist_ok=True)
     summary: dict[str, Any] = {
         "benchmark": "IEC TS 63587 C.2: nonlinear focused field in water",
@@ -413,8 +499,10 @@ def main() -> None:
             "regime": "CW",
         },
         "model": {
-            "solver": "pyWave3D: one-way Westervelt, spatial marching of harmonics in retarded time, exact "
-            "angular-spectrum diffraction, thermoviscous absorption, spectral/MUSCL-Godunov nonlinear step",
+            "solver": "pyWave3D: one-way Westervelt, spatial marching of harmonics in retarded time, angular-"
+            "spectrum diffraction, thermoviscous absorption, spectral/MUSCL-Godunov nonlinear step",
+            "diffraction": args.diffraction if args.diffraction != "pade" else f"pade, order {pade_order}",
+            "shock_smoothing": smoothing_record(smoothing),
             "source": f"the bowl's Rayleigh field on the plane z = {z_start * 1e3:.3f} mm from the apex",
             "transverse_domain": 2 * args.half_width,
             "pml_width": args.layer,

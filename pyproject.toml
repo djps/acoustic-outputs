@@ -24,6 +24,10 @@ dependencies = [
     "beartype>=0.18",
 ]
 
+[project.urls]
+Repository = "https://github.com/djps/acoustic-outputs"
+Bug-tracker = "https://github.com/djps/acoustic-outputs/issues"
+
 [project.optional-dependencies]
 hdf5 = ["h5py>=3.8", "hdf5plugin>=4"]
 kwave = ["k-wave-python>=0.6"]
