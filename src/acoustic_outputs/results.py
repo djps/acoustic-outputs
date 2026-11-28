@@ -285,6 +285,13 @@ class Results:
         """Pulse-intensity integral over one period on the axis [J/m^2], (nrec,)."""
         return iec.pulse_integrals(self.axis, self.frequency, self.impedance, axis=1)[1]
 
+    @property
+    def working_frequency(self) -> float:
+        """Arithmetic-mean acoustic working frequency f_awf at the focus [Hz] (IEC 62127-1), or the
+        base frequency where it is undefined. The derating and the exposure indices use it."""
+        f = iec.working_frequencies(self.axis[self.focal_index], self.frequency)["arithmetic_mean"]
+        return f if math.isfinite(f) else self.frequency
+
     def focal_lines(self) -> tuple[RealArray, RealArray, RealArray]:
         """The focal quantity along the beam axis, and along the x and y lines through the axis in the
         focal plane: (nrec,), (nx,), (ny,)."""
@@ -388,7 +395,7 @@ class Results:
                 "harmonics": [float(a) for a in np.abs(self.axis[i, :harmonics])],
                 "intensity": float(intensity[i]),
                 "heating_rate": float(self.axial_heating[i]),
-                "mechanical_index_water": p_r / 1e6 / math.sqrt(self.frequency / 1e6),
+                "mechanical_index_water": p_r / 1e6 / math.sqrt(self.working_frequency / 1e6),
             },
             "axis_peak_p_positive": {
                 "value": float(self.axis_p_plus.max()),
@@ -459,12 +466,13 @@ class Results:
         g = self.grid
         i = self.focal_index
         ix, iy = self.axis_ij
-        prof = self.axial() if prof is None else prof
+        axial, line_x, line_y = self.focal_lines()
+        prof = axial if prof is None else prof
         cell = g.dx * g.dy
         f0 = self.frequency
         focus_h = self.axis[i]
         freqs = iec.working_frequencies(focus_h, f0)
-        f_awf = freqs["arithmetic_mean"] if math.isfinite(freqs["arithmetic_mean"]) else f0
+        f_awf = self.working_frequency
         ppsi, pii = iec.pulse_integrals(focus_h, f0, self.impedance)
         i_spta = float(self.plane_intensity.max())
         out: dict[str, Any] = {
@@ -485,8 +493,8 @@ class Results:
             ),
             "side_lobes": {
                 "axial": iec.secondary_maxima(self.z, prof, i),
-                "x": iec.secondary_maxima(g.x, self.xz_p_plus[i], ix),
-                "y": iec.secondary_maxima(g.y, self.yz_p_plus[i], iy),
+                "x": iec.secondary_maxima(g.x, line_x, ix),
+                "y": iec.secondary_maxima(g.y, line_y, iy),
             },
             "nonlinear": {
                 "p_c_over_p_r": float(self.axis_p_plus[i] / -self.axis_p_minus[i])
@@ -542,8 +550,8 @@ class Results:
         else:
             a_aprt = math.nan
         zrel = self.z - g.z0
-        ti = iec.thermal_indices(zrel, float(self.power[0]), self.axial_intensity, f_awf, a_aprt)
-        mi = iec.mechanical_index(zrel, p_r_axis, self.axial_pii, f_awf, z_bp=ti["z_bp"])
+        ti = iec.thermal_indices(zrel, float(self.power[0]), self.axial_intensity, f_awf, a_aprt, self.derating)
+        mi = iec.mechanical_index(zrel, p_r_axis, self.axial_pii, f_awf, z_bp=ti["z_bp"], coefficient=self.derating)
         d = iec.derating(f_awf, zrel, self.derating)
         out["derated"] = {
             "coefficient_dB_per_cm_MHz": self.derating,
@@ -605,7 +613,8 @@ class Results:
         h = min(harmonics, self.axis.shape[1])
         amp_cols = "  ".join(f"|P{n + 1}| [Pa]" for n in range(h))
         written = [d / "axial.txt", d / "metrics.json", d / "results.npz"]
-        der = iec.derating(self.frequency, self.z - self.grid.z0, self.derating)
+        f_awf = self.working_frequency
+        der = iec.derating(f_awf, self.z - self.grid.z0, self.derating)
         cols = [
             self.z,
             self.axis_p_plus,
@@ -622,7 +631,7 @@ class Results:
             np.column_stack(cols),
             fmt="%.8e",
             header=f"beam axis (x, y) = {self.axis_xy}; focus at z = {self.z[self.focal_index]:.6e} m; "
-            f"derating {self.derating} dB/(cm MHz) at the base frequency\n"
+            f"derating {self.derating} dB/(cm MHz) at the acoustic working frequency {f_awf:.6e} Hz\n"
             f"z [m]  p+ [Pa]  p- [Pa]  I [W/m^2]  q [W/m^3]  pii [J/m^2]  p_r,a [Pa]  I_ta,a [W/m^2]  {amp_cols}",
         )
         cx = self.centroid_x if self.centroid_x is not None else np.full(self.z.size, np.nan)

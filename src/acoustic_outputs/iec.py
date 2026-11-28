@@ -340,10 +340,18 @@ def shock_formation(z: RealArray, harmonics: ComplexArray, axis: int = -1) -> di
 # -- exposure indices (IEC 62359) ---------------------------------------------------------
 
 
-def mechanical_index(z: RealArray, p_r: RealArray, pii: RealArray, f_awf: float, z_bp: float = 0.0) -> dict[str, float]:
+def mechanical_index(
+    z: RealArray,
+    p_r: RealArray,
+    pii: RealArray,
+    f_awf: float,
+    z_bp: float = 0.0,
+    coefficient: float = DERATING_DB_PER_CM_MHZ,
+) -> dict[str, float]:
     """MI = p_r,alpha(z_MI) [MPa] / sqrt(f_awf [MHz]), at the depth z_MI (>= z_bp) of the
-    maximum of the derated pulse-intensity integral (IEC 62359)."""
-    d = derating(f_awf, z)
+    maximum of the derated pulse-intensity integral (IEC 62359), derated by ``coefficient``
+    [dB / (cm MHz)]."""
+    d = derating(f_awf, z, coefficient)
     pii_a = pii * d**2
     ok = z >= z_bp
     if not np.any(ok):
@@ -354,7 +362,12 @@ def mechanical_index(z: RealArray, p_r: RealArray, pii: RealArray, f_awf: float,
 
 
 def thermal_indices(
-    z: RealArray, power: float, intensity_axis: RealArray, f_awf: float, aperture_area: float
+    z: RealArray,
+    power: float,
+    intensity_axis: RealArray,
+    f_awf: float,
+    aperture_area: float,
+    coefficient: float = DERATING_DB_PER_CM_MHZ,
 ) -> dict[str, float]:
     """Unscanned-mode thermal indices of IEC 62359 from the output power, the axial
     temporal-average intensity and the -12 dB output beam area (SI in, mW / cm inside).
@@ -363,14 +376,14 @@ def thermal_indices(
       max over z >= z_bp of min(P_alpha(z), I_ta,alpha(z) x 1 cm^2) f / C_TIS;
     * TIB: max over z >= z_bp of min(sqrt(P_alpha I_ta,alpha) / C_TIB1, P_alpha / C_TIB2);
     * TIC: P / (D_eq C_TIC), D_eq = sqrt(4 A_aprt / pi);
-    with z_bp = 1.5 D_eq and f in MHz.
+    with z_bp = 1.5 D_eq and f in MHz, and the derating by ``coefficient`` [dB / (cm MHz)].
     """
     f = f_awf / 1e6
     p_mw = power * 1e3
     a_cm2 = aperture_area * 1e4
     d_eq = math.sqrt(4 * a_cm2 / math.pi)  # cm
     z_bp = 1.5 * d_eq / 100  # m
-    d2 = derating(f_awf, z) ** 2
+    d2 = derating(f_awf, z, coefficient) ** 2
     pa = p_mw * d2  # mW
     ia = intensity_axis * d2 * 1e3 / 1e4  # mW / cm^2
     ok = z >= z_bp

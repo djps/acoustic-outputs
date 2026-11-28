@@ -128,6 +128,11 @@ def test_mechanical_and_thermal_indices() -> None:
     assert ti["TIC"] == pytest.approx(100 / (d_eq * iec.C_TIC))
     assert ti["z_bp"] == pytest.approx(1.5 * d_eq / 100)
     assert ti["TIB"] > 0
+    # the derating coefficient reaches both: none leaves the water values, the largest p_r and TIB
+    mi0 = iec.mechanical_index(z, p_r, pii, 2e6, coefficient=0.0)
+    assert mi0["z_MI"] == pytest.approx(0.04, abs=1e-4) and mi0["p_r_derated"] == pytest.approx(2e6)
+    ti0 = iec.thermal_indices(z, 0.1, np.full(z.size, 1e4), 2e6, 0.5e-4, coefficient=0.0)
+    assert ti0["TIB"] > ti["TIB"]
 
 
 @pytest.fixture(scope="module")
@@ -186,6 +191,10 @@ def test_files(run: ao.Results, tmp_path) -> None:
     ax = np.loadtxt(tmp_path / "axial.txt")
     assert ax.shape[1] == 8 + 4
     np.testing.assert_allclose(ax[:, 5], run.axial_pii)
+    # the derated columns use the acoustic working frequency, as the derated metrics do
+    d = iec.derating(run.working_frequency, run.z - run.grid.z0, run.derating)
+    np.testing.assert_allclose(ax[:, 6], -run.axis_p_minus * d)
+    assert run.working_frequency == run.metrics()["iec"]["acoustic_working_frequency"]["arithmetic_mean"]
     pl = np.loadtxt(tmp_path / "planes.txt")
     np.testing.assert_allclose(pl[:, 1], run.power)
 

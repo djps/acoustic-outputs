@@ -175,6 +175,10 @@ def test_side_lobe_peaks_and_level_extents() -> None:
     lobes = iec.side_lobe_peaks(res.grid.x, line_x, res.axis_ij[0])
     first = min((p for p in lobes if p["position"] > 0), key=lambda p: p["position"])
     assert first["level_dB"] == pytest.approx(m["iec"]["side_lobes"]["x"]["after_level_dB"])
+    # the lateral side lobes are of the focal quantity, as the axial ones are
+    res.focal_quantity = "first_harmonic"
+    _, line_x, _ = res.focal_lines()
+    assert res.metrics()["iec"]["side_lobes"]["x"] == iec.secondary_maxima(res.grid.x, line_x, res.axis_ij[0])
 
 
 def test_save_and_load_round_trip(tmp_path: Path, beam: GaussianBeam) -> None:

@@ -339,7 +339,7 @@ $$
 z_{MI} = \arg\max_{z - z_0 \ge z_{bp}} \mathrm{pii}_{\alpha}(z) .
 $$
 
-The value in water, without derating, at the focus is $p_r(\mathbf{x}_f) / \sqrt{f_0}$ with the same units.
+The value in water, without derating, at the focus is $p_r(\mathbf{x}_f) / \sqrt{f_{awf}}$ with the same units.
 
 Thermal indices (unscanned mode), with $P = P(z_0)$ the source power in mW, $f_{awf}$ in MHz, $I_{ta,\alpha}$ in mW cm⁻² on the axis, and $C_{TIS} = 210$ mW MHz, $C_{TIB1} = 50$ mW cm⁻¹, $C_{TIB2} = 4.4$ mW, $C_{TIC} = 40$ mW cm⁻¹:
 
